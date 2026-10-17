@@ -1,0 +1,32 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# 서명 키
+*.jks
+*.keystore
+
+# 빌드 결과물
+/app/release/
+*.apk
+*.aab
+
+# 임시 파일
+.gradle/
+.kotlin/
+/build/
+local.properties
+
+# Firebase 설정 (공개 저장소로 바꿀 때 주석 해제)
+# app/google-services.json

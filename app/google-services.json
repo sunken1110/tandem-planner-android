@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "381494567566",
+    "project_id": "projectaga-3fcfc",
+    "storage_bucket": "projectaga-3fcfc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:381494567566:android:f839a2daac767e369c9fdf",
+        "android_client_info": {
+          "package_name": "io.github.sunken1110.tandemplanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwR9Cs22DDXQjRekTUQzZBVVCS1EbMv9U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

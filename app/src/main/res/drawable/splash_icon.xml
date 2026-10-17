@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 288dp 정사각형 영역 가운데에, 원래 비율대로 그린다 -->
+    <item
+        android:width="136dp"
+        android:height="136dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_icon_src" />
+</layer-list>
