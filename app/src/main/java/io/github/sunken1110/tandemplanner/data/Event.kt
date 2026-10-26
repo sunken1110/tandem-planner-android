@@ -18,6 +18,6 @@ data class Event(
     val date: LocalDate,
     val time: String,
     val title: String,
-    val authorUid: String = "",
-    val authorName: String = ""
+    val authorUid: String,
+    val authorName: String
 )

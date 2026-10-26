@@ -19,6 +19,9 @@ import androidx.compose.ui.platform.LocalContext
  * Requires `<uses-permission android:name="android.permission.VIBRATE" />`.
  */
 class Haptics(context: Context) {
+
+    private enum class Kind { TAP, CONFIRM, REJECT }
+
     private val vibrator: Vibrator? =
         if (Build.VERSION.SDK_INT >= 31) {
             context.getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -27,24 +30,36 @@ class Haptics(context: Context) {
             context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
 
-    private fun play(effectId: Int, fallbackMs: Long, fallbackAmplitude: Int) {
+    private fun play(kind: Kind) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
         if (Build.VERSION.SDK_INT >= 29) {
-            v.vibrate(VibrationEffect.createPredefined(effectId))
+            // Predefined effects (API 29+) are referenced only inside this check.
+            val effect = when (kind) {
+                Kind.TAP -> VibrationEffect.EFFECT_CLICK
+                Kind.CONFIRM -> VibrationEffect.EFFECT_HEAVY_CLICK
+                Kind.REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK
+            }
+            v.vibrate(VibrationEffect.createPredefined(effect))
         } else {
-            v.vibrate(VibrationEffect.createOneShot(fallbackMs, fallbackAmplitude))
+            // Fallback for API 26–28: one-shot pulses approximating each effect.
+            val (durationMs, amplitude) = when (kind) {
+                Kind.TAP -> 12L to 120
+                Kind.CONFIRM -> 25L to 255
+                Kind.REJECT -> 40L to 180
+            }
+            v.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
         }
     }
 
     /** Light tick: buttons, date selection. */
-    fun tap() = play(VibrationEffect.EFFECT_CLICK, 12, 120)
+    fun tap() = play(Kind.TAP)
 
     /** Firm click: successful save. */
-    fun confirm() = play(VibrationEffect.EFFECT_HEAVY_CLICK, 25, 255)
+    fun confirm() = play(Kind.CONFIRM)
 
     /** Double tick: delete, or invalid input. */
-    fun reject() = play(VibrationEffect.EFFECT_DOUBLE_CLICK, 40, 180)
+    fun reject() = play(Kind.REJECT)
 }
 
 @Composable

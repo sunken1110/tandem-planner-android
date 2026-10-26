@@ -7,16 +7,12 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,20 +32,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.DayCell
-import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaders
+import io.github.sunken1110.tandemplanner.ui.common.MemberDot
+import io.github.sunken1110.tandemplanner.ui.common.MonthGrid
+import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaderRow
+import io.github.sunken1110.tandemplanner.ui.common.YearPaint
 import io.github.sunken1110.tandemplanner.ui.common.dayNumberColor
 import io.github.sunken1110.tandemplanner.ui.common.koreanShort
-import io.github.sunken1110.tandemplanner.ui.common.weekdayHeaderColor
+import io.github.sunken1110.tandemplanner.ui.common.weekendColor
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
-import io.github.sunken1110.tandemplanner.ui.theme.SaturdaySky
-import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -65,10 +60,7 @@ import java.time.YearMonth
 @Composable
 fun MonthDetail(
     yearMonth: YearMonth,
-    today: LocalDate,
-    passedDays: Int,
-    fillProvider: () -> Float,
-    yearColors: List<Color>,
+    paint: YearPaint,
     eventsByDate: Map<LocalDate, List<Event>>,
     sharedScope: SharedTransitionScope?,
     animScope: AnimatedVisibilityScope?,
@@ -82,14 +74,12 @@ fun MonthDetail(
 ) {
     val haptics = rememberHaptics()
     val season = Season.of(yearMonth.monthValue)
-    val firstDayOffset = yearMonth.atDay(1).dayOfWeek.value % 7 // Sunday = 0
     val daysInMonth = yearMonth.lengthOfMonth()
-    val rows = (firstDayOffset + daysInMonth + 6) / 7
-    val passedInMonth = (1..daysInMonth).count { yearMonth.atDay(it).dayOfYear <= passedDays }
+    val passedInMonth = (1..daysInMonth).count { paint.isPast(yearMonth.atDay(it)) }
 
     // Default selection: today for the current month, otherwise the 1st.
     var selectedDay by rememberSaveable(yearMonth.monthValue) {
-        mutableIntStateOf(if (YearMonth.from(today) == yearMonth) today.dayOfMonth else 1)
+        mutableIntStateOf(if (YearMonth.from(paint.today) == yearMonth) paint.today.dayOfMonth else 1)
     }
     val selectedDate = yearMonth.atDay(selectedDay.coerceIn(1, daysInMonth))
     var showAddDialog by remember { mutableStateOf(false) }
@@ -131,99 +121,58 @@ fun MonthDetail(
             modifier = Modifier.padding(start = 12.dp, bottom = 12.dp)
         )
 
-        // ── Weekday header ──
-        Row(Modifier.fillMaxWidth()) {
-            WeekdayHeaders.forEachIndexed { i, w ->
-                Text(
-                    w,
-                    modifier = Modifier.weight(1f),
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    color = weekdayHeaderColor(i)
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-
         // ── Day grid ──
-        for (r in 0 until rows) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+        WeekdayHeaderRow(fontSize = 12.sp)
+        Spacer(Modifier.height(6.dp))
+        MonthGrid(yearMonth, gap = 6.dp) { date, column ->
+            val isPast = paint.isPast(date)
+            DayCell(
+                date = date,
+                paint = paint,
+                corner = 10.dp,
+                borderWidth = 2.dp,
+                isSelected = date.dayOfMonth == selectedDay,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable {
+                        haptics.tap()
+                        selectedDay = date.dayOfMonth
+                    }
             ) {
-                for (c in 0 until 7) {
-                    val day = r * 7 + c - firstDayOffset + 1
-                    Box(Modifier.weight(1f).aspectRatio(1f)) {
-                        if (day in 1..daysInMonth) {
-                            val date = yearMonth.atDay(day)
-                            val doy = date.dayOfYear
-                            val isPast = doy <= passedDays
-                            val isToday = date == today
-                            val dayEvents = eventsByDate[date].orEmpty()
-
-                            DayCell(
-                                base = yearColors[doy - 1],
-                                dayOfYear = doy,
-                                passedDays = passedDays,
-                                fillProvider = fillProvider,
-                                isToday = isToday,
-                                isSelected = day == selectedDay,
-                                corner = 10.dp,
-                                borderWidth = 2.dp,
+                // Day number, top-left. On filled cells a very faint white badge
+                // keeps weekend colors readable.
+                Text(
+                    "${date.dayOfMonth}",
+                    fontSize = 10.sp,
+                    lineHeight = 10.sp,
+                    fontWeight = if (date == paint.today) FontWeight.Bold else FontWeight.Medium,
+                    color = dayNumberColor(column = column, isPast = isPast),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 4.dp, top = 4.dp)
+                        .then(
+                            if (isPast) Modifier.background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(3.dp))
+                            else Modifier
+                        )
+                        .padding(horizontal = 2.dp)
+                )
+                // Up to three author-colored dots; the white ring separates them from the cell.
+                val dayEvents = eventsByDate[date].orEmpty()
+                if (dayEvents.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        dayEvents.take(3).forEach { ev ->
+                            MemberDot(
+                                color = colorOf(ev.authorUid),
+                                size = 4.dp,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        haptics.tap()
-                                        selectedDay = day
-                                    }
-                            ) {
-                                // Day number, top-left. On filled cells a very faint
-                                // white badge keeps weekend colors readable.
-                                Box(
-                                    Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(start = 4.dp, top = 4.dp)
-                                        .then(
-                                            if (isPast) Modifier.background(
-                                                Color.White.copy(alpha = 0.3f),
-                                                RoundedCornerShape(3.dp)
-                                            ) else Modifier
-                                        )
-                                        .padding(horizontal = 2.dp)
-                                ) {
-                                    Text(
-                                        "$day",
-                                        fontSize = 10.sp,
-                                        lineHeight = 10.sp,
-                                        fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium,
-                                        color = dayNumberColor(column = c, isPast = isPast)
-                                    )
-                                }
-                                // Up to three author-colored dots; the white ring
-                                // separates them from the cell color.
-                                if (dayEvents.isNotEmpty()) {
-                                    Row(
-                                        Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .padding(bottom = 5.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        dayEvents.take(3).forEach { ev ->
-                                            Box(
-                                                Modifier
-                                                    .size(6.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.White.copy(alpha = 0.9f))
-                                                    .padding(1.dp)
-                                                    .clip(CircleShape)
-                                                    .background(colorOf(ev.authorUid))
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                                    .background(Color.White.copy(alpha = 0.9f), CircleShape)
+                                    .padding(1.dp)
+                            )
                         }
                     }
                 }
@@ -231,18 +180,14 @@ fun MonthDetail(
         }
 
         // ── Selected day's events ──
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             val dow = selectedDate.dayOfWeek
             Text(
                 "${selectedDate.monthValue}월 ${selectedDate.dayOfMonth}일 (${dow.koreanShort()})",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = when (dow) {
-                    DayOfWeek.SUNDAY -> SundayRed
-                    DayOfWeek.SATURDAY -> SaturdaySky
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+                color = dow.weekendColor() ?: MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(start = 4.dp)
             )
             Spacer(Modifier.weight(1f))
@@ -251,7 +196,7 @@ fun MonthDetail(
 
         // Timed events first (sorted by time), untimed events last.
         val dayEvents = eventsByDate[selectedDate].orEmpty().sortedBy { it.time.ifBlank { "99:99" } }
-        val accent = yearColors[selectedDate.dayOfYear - 1]
+        val accent = paint.colorOf(selectedDate)
 
         Column(Modifier.animateContentSize()) {
             if (dayEvents.isEmpty()) {

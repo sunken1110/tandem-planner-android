@@ -3,13 +3,10 @@ package io.github.sunken1110.tandemplanner.ui.share
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,7 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.ui.common.MemberDot
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.common.memberLabel
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -39,11 +38,13 @@ private const val STATUS_DEBOUNCE_MS = 2_000
  */
 @Composable
 fun SharedBar(calendar: SharedCalendar, onClick: () -> Unit) {
+    val pill = Modifier
+        .clip(RoundedCornerShape(50))
+        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
+
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
+            pill
                 .clickable(onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -51,25 +52,15 @@ fun SharedBar(calendar: SharedCalendar, onClick: () -> Unit) {
             val members = calendar.members
             if (members.isEmpty()) {
                 Text("공동 달력", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            } else {
-                members.forEachIndexed { i, uid ->
-                    if (i > 0) Text("  ·  ", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(calendar.colorOf(uid))
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        calendar.displayName(uid, "") + if (uid == calendar.uid) " (나)" else "",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                if (members.size < 2) {
-                    Text("  ·  초대하기", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                }
+            }
+            members.forEachIndexed { i, uid ->
+                if (i > 0) Text("  ·  ", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                MemberDot(color = calendar.colorOf(uid), size = 8.dp)
+                Spacer(Modifier.width(5.dp))
+                Text(calendar.memberLabel(uid), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+            if (members.size == 1) {
+                Text("  ·  초대하기", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -78,22 +69,15 @@ fun SharedBar(calendar: SharedCalendar, onClick: () -> Unit) {
         var showStatus by remember { mutableStateOf(false) }
         val busy = calendar.offline || calendar.pendingWrites
         LaunchedEffect(busy) {
-            if (busy) {
-                delay(STATUS_DEBOUNCE_MS.milliseconds)
-                showStatus = true
-            } else {
-                showStatus = false
-            }
+            if (busy) delay(STATUS_DEBOUNCE_MS.milliseconds)
+            showStatus = busy
         }
         AnimatedVisibility(visible = showStatus) {
             Text(
                 if (calendar.offline) "오프라인 · 연결되면 자동 저장" else "저장 중…",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.75f))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                modifier = pill.padding(horizontal = 10.dp, vertical = 5.dp)
             )
         }
     }

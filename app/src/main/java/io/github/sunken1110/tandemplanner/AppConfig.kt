@@ -20,6 +20,9 @@ internal val DEBUG_TODAY: LocalDate? = null
 /** Returns the current date, honoring [DEBUG_TODAY] when set. */
 internal fun currentDate(): LocalDate = DEBUG_TODAY ?: LocalDate.now()
 
+/** Max characters for a member's display name. */
+internal const val MAX_NAME_LENGTH = 12
+
 // ── Year fill animation ──
 
 /** How many "days" a single cell takes to fade from transparent to full color. */

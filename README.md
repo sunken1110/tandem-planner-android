@@ -31,7 +31,6 @@
 - Events sync in real time through Cloud Firestore.
 - Each member has an accent color. Event dots and author chips show who added what.
 - **Offline-first:** events can be read and added without a connection, and they sync automatically when it comes back.
-- Events saved by earlier local-only versions can be migrated into the shared calendar once.
 
 ### Month view and events
 - Tap a month to expand it in place (shared-element transition), and swipe through months with the arrows.
@@ -85,11 +84,10 @@ app/src/main/java/io/github/sunken1110/tandemplanner/
 │   └─ Season.kt            # Seasons, season boundaries, per-day color
 ├─ data/
 │   ├─ Event.kt             # Event model
-│   ├─ SharedCalendar.kt    # Firebase repository: auth, rooms, real-time events
-│   └─ LocalEventStore.kt   # Legacy on-device events (for one-time migration)
+│   └─ SharedCalendar.kt    # Firebase repository: auth, rooms, real-time events
 └─ ui/
     ├─ theme/               # Material theme + calendar/member colors
-    ├─ common/              # DayCell, weekday labels, shared helpers
+    ├─ common/              # DayCell, MonthGrid, YearPaint, member helpers, labels
     ├─ effects/             # Seasonal particles, intro overlay, haptics
     ├─ calendar/            # CalendarScreen: screen state and year↔month switching
     ├─ year/                # Year header, progress bar, 12-month grid

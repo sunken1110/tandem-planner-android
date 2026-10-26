@@ -3,39 +3,36 @@ package io.github.sunken1110.tandemplanner.ui.common
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import io.github.sunken1110.tandemplanner.data.SharedCalendar
-import io.github.sunken1110.tandemplanner.ui.theme.MemberColors
 import io.github.sunken1110.tandemplanner.ui.theme.OnSeasonColor
 import io.github.sunken1110.tandemplanner.ui.theme.SaturdaySky
 import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
-import io.github.sunken1110.tandemplanner.ui.theme.UnknownMemberColor
 import java.time.DayOfWeek
 
 /** Column headers for a Sunday-first calendar grid. */
-val WeekdayHeaders = listOf("일", "월", "화", "수", "목", "금", "토")
+internal val WeekdayHeaders = listOf("일", "월", "화", "수", "목", "금", "토")
 
 /** Short Korean weekday name, e.g. "월" for Monday. */
-fun DayOfWeek.koreanShort(): String = listOf("월", "화", "수", "목", "금", "토", "일")[value - 1]
+fun DayOfWeek.koreanShort(): String = WeekdayHeaders[value % 7] // Sunday (7) → index 0
 
-/** Header color for a Sunday-first grid column (0 = Sunday … 6 = Saturday). */
-@Composable
-fun weekdayHeaderColor(column: Int): Color = when (column) {
+/** Sunday red / Saturday sky for a Sunday-first column (0..6), or null on weekdays. */
+private fun columnWeekendColor(column: Int): Color? = when (column) {
     0 -> SundayRed
     6 -> SaturdaySky
-    else -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> null
 }
+
+/** Weekend color for a weekday, or null on Monday–Friday. */
+fun DayOfWeek.weekendColor(): Color? = columnWeekendColor(value % 7)
+
+/** Header color for a Sunday-first grid column. */
+@Composable
+internal fun weekdayHeaderColor(column: Int): Color =
+    columnWeekendColor(column) ?: MaterialTheme.colorScheme.onSurfaceVariant
 
 /**
  * Day-number color in a Sunday-first grid.
  * Weekends always keep their color; weekdays switch to dark text on filled cells.
  */
 @Composable
-fun dayNumberColor(column: Int, isPast: Boolean): Color = when (column) {
-    0 -> SundayRed
-    6 -> SaturdaySky
-    else -> if (isPast) OnSeasonColor else MaterialTheme.colorScheme.onSurface
-}
-
-/** Accent color for a member, based on join order. */
-fun SharedCalendar.colorOf(uid: String): Color =
-    MemberColors.getOrElse(memberIndex(uid)) { UnknownMemberColor }
+fun dayNumberColor(column: Int, isPast: Boolean): Color =
+    columnWeekendColor(column) ?: if (isPast) OnSeasonColor else MaterialTheme.colorScheme.onSurface

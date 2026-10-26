@@ -23,15 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.seasonEnd
+import io.github.sunken1110.tandemplanner.ui.common.YearPaint
 import io.github.sunken1110.tandemplanner.ui.theme.OnSeasonColor
-import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /** Banner shown on the first day of a season (Mar 1, Jun 1, Sep 1, Dec 1). */
@@ -61,21 +60,16 @@ fun SeasonBanner(season: Season, onClose: () -> Unit) {
  * @param shownCount day count currently displayed (follows the fill animation).
  */
 @Composable
-fun YearHeader(
-    today: LocalDate,
-    season: Season,
-    shownCount: Int,
-    passedDays: Int,
-    totalDays: Int,
-    yearColors: List<Color>,
-    fillProvider: () -> Float
-) {
-    Text("${today.year}년", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+fun YearHeader(paint: YearPaint, shownCount: Int) {
+    val today = paint.today
+    val season = Season.of(today.monthValue)
+
+    Text("${paint.year}년", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Row(verticalAlignment = Alignment.Bottom) {
         Text("${shownCount}일 지남", fontSize = 28.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.width(6.dp))
         Text(
-            "/ ${totalDays}일 (${"%.1f".format(shownCount * 100f / totalDays)}%)",
+            "/ ${paint.totalDays}일 (${"%.1f".format(shownCount * 100f / paint.totalDays)}%)",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 4.dp)
@@ -83,7 +77,7 @@ fun YearHeader(
     }
     Spacer(Modifier.height(8.dp))
 
-    GradientProgressBar(yearColors, passedDays, totalDays, fillProvider)
+    GradientProgressBar(paint)
     Spacer(Modifier.height(10.dp))
 
     val daysLeft = ChronoUnit.DAYS.between(today, seasonEnd(today))
@@ -127,11 +121,12 @@ fun YearHeader(
  * revealed up to the current fill position. Animation is read in the draw phase only.
  */
 @Composable
-fun GradientProgressBar(yearColors: List<Color>, passedDays: Int, totalDays: Int, fillProvider: () -> Float) {
+private fun GradientProgressBar(paint: YearPaint) {
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val total = paint.totalDays
     // Sample every 4th day as a gradient stop; plenty for an 8dp bar.
-    val stops = remember(yearColors) {
-        (0 until totalDays step 4).map { i -> (i / (totalDays - 1f)) to yearColors[i] }.toTypedArray()
+    val stops = remember(paint.dayColors) {
+        (0 until total step 4).map { i -> (i / (total - 1f)) to paint.dayColors[i] }.toTypedArray()
     }
     Canvas(
         Modifier
@@ -140,8 +135,8 @@ fun GradientProgressBar(yearColors: List<Color>, passedDays: Int, totalDays: Int
     ) {
         val radius = CornerRadius(size.height / 2, size.height / 2)
         drawRoundRect(color = trackColor, cornerRadius = radius)
-        val progress = fillProvider().coerceAtMost(passedDays.toFloat())
-        val filledWidth = size.width * progress / totalDays
+        val progress = paint.fill().coerceAtMost(paint.passedDays.toFloat())
+        val filledWidth = size.width * progress / total
         if (filledWidth > 0f) {
             // Gradient spans the full width; only the elapsed part is revealed.
             clipRect(right = filledWidth) {

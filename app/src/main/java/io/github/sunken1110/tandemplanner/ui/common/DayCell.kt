@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import io.github.sunken1110.tandemplanner.FADE_DAYS
+import java.time.LocalDate
 
 /**
  * One day cell, shared by the year grid and the month view.
@@ -43,23 +44,22 @@ import io.github.sunken1110.tandemplanner.FADE_DAYS
  * - Selected: a primary-color outline (takes precedence over today's outline).
  *
  * Performance: all drawing happens in the draw phase via [drawWithCache], and
- * [fillProvider] is read only there, so the animation never triggers recomposition.
- *
- * @param fillProvider current fill progress in "days" (may be fractional).
+ * [YearPaint.fill] is read only there, so the animation never triggers recomposition.
  */
 @Composable
 fun DayCell(
-    base: Color,
-    dayOfYear: Int,
-    passedDays: Int,
-    fillProvider: () -> Float,
-    isToday: Boolean,
+    date: LocalDate,
+    paint: YearPaint,
     corner: Dp,
     borderWidth: Dp,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
+    val base = paint.colorOf(date)
+    val dayOfYear = date.dayOfYear
+    val isPast = paint.isPast(date)
+    val isToday = date == paint.today
     val dark = isSystemInDarkTheme()
     val brush = remember(base, dark) {
         Brush.linearGradient(listOf(lerp(base, Color.White, if (dark) 0.25f else 0.4f), base))
@@ -108,8 +108,8 @@ fun DayCell(
 
                 onDrawBehind {
                     // 0 = not reached yet, 1 = fully colored.
-                    val p = if (dayOfYear <= passedDays) {
-                        ((fillProvider() - (dayOfYear - 1)) / FADE_DAYS).coerceIn(0f, 1f)
+                    val p = if (isPast) {
+                        ((paint.fill() - (dayOfYear - 1)) / FADE_DAYS).coerceIn(0f, 1f)
                     } else 0f
 
                     if (glowBrush != null && p > 0f) {

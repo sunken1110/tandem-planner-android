@@ -42,20 +42,18 @@ class SharedCalendar(context: Context) {
     private val prefs = context.getSharedPreferences("shared_calendar", Context.MODE_PRIVATE)
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
-    private val localStore = LocalEventStore(context)
 
     var uid by mutableStateOf(auth.currentUser?.uid)
         private set
-    var roomCode by mutableStateOf(prefs.getString("room", null))
+    var roomCode by mutableStateOf(prefs.getString(KEY_ROOM, null))
         private set
-    var myName by mutableStateOf(prefs.getString("name", "") ?: "")
+    var myName by mutableStateOf(prefs.getString(KEY_NAME, "") ?: "")
         private set
 
     val events = mutableStateListOf<Event>()
     var members by mutableStateOf<List<String>>(emptyList())
         private set
-    var names by mutableStateOf<Map<String, String>>(emptyMap())
-        private set
+    private var names by mutableStateOf<Map<String, String>>(emptyMap())
 
     /** True while the UI is showing cached data because the server is unreachable. */
     var offline by mutableStateOf(false)
@@ -71,21 +69,30 @@ class SharedCalendar(context: Context) {
     /** Set right after creating a room so the UI can open the share dialog once. */
     var justCreated by mutableStateOf(false)
 
+    private fun reportError(message: String, cause: Exception? = null) {
+        lastError = if (cause == null) message else "$message (${cause.message})"
+    }
+
+    /** Awaits a write with a timeout. Returns false and reports an error if it doesn't finish. */
+    private suspend fun <T> Task<T>.awaitOnline(): Boolean {
+        val done = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { awaitResult(); true } != null
+        if (!done) reportError(MSG_OFFLINE)
+        return done
+    }
+
+    private fun room(code: String) = db.collection("rooms").document(code)
+
     // ─────────────────────────────────────────────
     // Auth
     // ─────────────────────────────────────────────
 
-    suspend fun ensureSignedIn(): Boolean {
+    private suspend fun ensureSignedIn(): Boolean {
         auth.currentUser?.let { uid = it.uid; return true }
         return try {
             val result = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { auth.signInAnonymously().awaitResult() }
-            if (result == null) {
-                lastError = "인터넷 연결을 확인해 주세요."
-                false
-            } else {
-                uid = result.user?.uid
-                uid != null
-            }
+            uid = result?.user?.uid
+            if (result == null) reportError(MSG_OFFLINE)
+            uid != null
         } catch (e: Exception) {
             lastError = "로그인하지 못했어요. Firebase 콘솔에서 '익명' 로그인이 켜져 있는지 확인해 주세요.\n(${e.message})"
             false
@@ -108,74 +115,52 @@ class SharedCalendar(context: Context) {
                 "createdAt" to FieldValue.serverTimestamp()
             )
             try {
-                // `true` on success, `null` on timeout (set() itself returns Void).
-                val ok = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
-                    db.collection("rooms").document(code).set(data).awaitResult()
-                    true
-                }
-                if (ok == null) {
-                    lastError = "인터넷 연결을 확인해 주세요."
-                    return false
-                }
+                if (!room(code).set(data).awaitOnline()) return false
                 saveRoom(code, name)
                 justCreated = true
                 return true
             } catch (e: FirebaseFirestoreException) {
-                // PERMISSION_DENIED here almost always means the code already exists → retry.
+                // PERMISSION_DENIED here means the code is already taken → try another one.
                 if (e.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                    lastError = "달력을 만들지 못했어요. (${e.message})"
+                    reportError(MSG_CREATE_FAILED, e)
                     return false
                 }
             } catch (e: Exception) {
-                lastError = "달력을 만들지 못했어요. (${e.message})"
+                reportError(MSG_CREATE_FAILED, e)
                 return false
             }
         }
-        lastError = "달력을 만들지 못했어요. 잠시 후 다시 시도해 주세요."
+        reportError("$MSG_CREATE_FAILED 잠시 후 다시 시도해 주세요.")
         return false
     }
 
-    /** Joins an existing room by its 6-character code. Security rules cap rooms at two members. */
+    /** Joins an existing room by its code. Security rules cap rooms at two members. */
     suspend fun joinRoom(rawCode: String, name: String): Boolean {
         val code = rawCode.trim().uppercase()
         if (code.length != CODE_LENGTH) {
-            lastError = "코드 6자리를 정확히 입력해 주세요."
+            reportError("코드 ${CODE_LENGTH}자리를 정확히 입력해 주세요.")
             return false
         }
         if (!ensureSignedIn()) return false
         val me = uid ?: return false
         return try {
-            val ok = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
-                db.collection("rooms").document(code).update(
-                    mapOf(
-                        "members" to FieldValue.arrayUnion(me),
-                        "names.$me" to name
-                    )
-                ).awaitResult()
-                true
-            }
-            if (ok == null) {
-                lastError = "인터넷 연결을 확인해 주세요."
-                false
-            } else {
-                saveRoom(code, name)
-                true
-            }
+            val update = mapOf("members" to FieldValue.arrayUnion(me), "names.$me" to name)
+            room(code).update(update).awaitOnline().also { ok -> if (ok) saveRoom(code, name) }
         } catch (e: FirebaseFirestoreException) {
-            lastError = when (e.code) {
-                FirebaseFirestoreException.Code.NOT_FOUND -> "이 코드로 만든 달력이 없어요. 코드를 다시 확인해 주세요."
-                FirebaseFirestoreException.Code.PERMISSION_DENIED -> "이미 두 명이 쓰고 있는 달력이에요."
-                else -> "참여하지 못했어요. (${e.message})"
+            when (e.code) {
+                FirebaseFirestoreException.Code.NOT_FOUND -> reportError("이 코드로 만든 달력이 없어요. 코드를 다시 확인해 주세요.")
+                FirebaseFirestoreException.Code.PERMISSION_DENIED -> reportError("이미 두 명이 쓰고 있는 달력이에요.")
+                else -> reportError(MSG_JOIN_FAILED, e)
             }
             false
         } catch (e: Exception) {
-            lastError = "참여하지 못했어요. (${e.message})"
+            reportError(MSG_JOIN_FAILED, e)
             false
         }
     }
 
     private fun saveRoom(code: String, name: String) {
-        prefs.edit().putString("room", code).putString("name", name).apply()
+        prefs.edit().putString(KEY_ROOM, code).putString(KEY_NAME, name).apply()
         roomCode = code
         myName = name
         lastError = null
@@ -191,36 +176,27 @@ class SharedCalendar(context: Context) {
      */
     fun startListening(): List<ListenerRegistration> {
         val code = roomCode ?: return emptyList()
-        val room = db.collection("rooms").document(code)
 
-        val roomListener = room.addSnapshotListener { snap, err ->
-            if (err != null) {
-                lastError = "달력 정보를 불러오지 못했어요. (${err.message})"
-                return@addSnapshotListener
-            }
-            if (snap != null && snap.exists()) {
-                @Suppress("UNCHECKED_CAST")
-                members = (snap.get("members") as? List<String>).orEmpty()
-                @Suppress("UNCHECKED_CAST")
-                names = (snap.get("names") as? Map<String, String>).orEmpty()
-            }
+        val roomListener = room(code).addSnapshotListener { snap, err ->
+            if (err != null) return@addSnapshotListener reportError("달력 정보를 불러오지 못했어요.", err)
+            if (snap == null || !snap.exists()) return@addSnapshotListener
+            @Suppress("UNCHECKED_CAST")
+            members = (snap.get("members") as? List<String>).orEmpty()
+            @Suppress("UNCHECKED_CAST")
+            names = (snap.get("names") as? Map<String, String>).orEmpty()
         }
 
-        val eventsListener = room.collection("events")
+        val eventsListener = room(code).collection("events")
             .addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
-                if (err != null) {
-                    lastError = "일정을 불러오지 못했어요. (${err.message})"
-                    return@addSnapshotListener
-                }
+                if (err != null) return@addSnapshotListener reportError("일정을 불러오지 못했어요.", err)
                 if (snap == null) return@addSnapshotListener
                 offline = snap.metadata.isFromCache
                 pendingWrites = snap.metadata.hasPendingWrites()
                 // Missing fields fall back to defaults and unknown fields are ignored,
                 // so mixed app versions can share the same data.
                 val list = snap.documents.mapNotNull { d ->
-                    val date = d.getString("date")?.let {
-                        runCatching { LocalDate.parse(it) }.getOrNull()
-                    } ?: return@mapNotNull null
+                    val date = d.getString("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                        ?: return@mapNotNull null
                     Event(
                         id = d.id,
                         date = date,
@@ -246,7 +222,7 @@ class SharedCalendar(context: Context) {
     fun addEvent(date: LocalDate, time: String, title: String) {
         val code = roomCode ?: return
         val me = uid ?: return
-        db.collection("rooms").document(code).collection("events").document()
+        room(code).collection("events").document()
             .set(
                 mapOf(
                     "date" to date.toString(),
@@ -257,14 +233,14 @@ class SharedCalendar(context: Context) {
                     "createdAt" to FieldValue.serverTimestamp()
                 )
             )
-            .addOnFailureListener { lastError = "일정을 저장하지 못했어요. (${it.message})" }
+            .addOnFailureListener { reportError("일정을 저장하지 못했어요.", it) }
     }
 
     fun deleteEvent(event: Event) {
         val code = roomCode ?: return
-        db.collection("rooms").document(code).collection("events").document(event.id)
+        room(code).collection("events").document(event.id)
             .delete()
-            .addOnFailureListener { lastError = "일정을 지우지 못했어요. (${it.message})" }
+            .addOnFailureListener { reportError("일정을 지우지 못했어요.", it) }
     }
 
     // ─────────────────────────────────────────────
@@ -274,44 +250,35 @@ class SharedCalendar(context: Context) {
     fun rename(newName: String) {
         val code = roomCode ?: return
         val me = uid ?: return
-        prefs.edit().putString("name", newName).apply()
+        prefs.edit().putString(KEY_NAME, newName).apply()
         myName = newName
-        db.collection("rooms").document(code).update("names.$me", newName)
-            .addOnFailureListener { lastError = "이름을 바꾸지 못했어요. (${it.message})" }
+        room(code).update("names.$me", newName)
+            .addOnFailureListener { reportError("이름을 바꾸지 못했어요.", it) }
     }
 
     /** Current display name of a member, falling back to the name stored on the event. */
-    fun displayName(authorUid: String, fallback: String): String =
-        names[authorUid]?.takeIf { it.isNotBlank() } ?: fallback.ifBlank { "알 수 없음" }
+    fun displayName(memberUid: String, fallback: String): String =
+        names[memberUid]?.takeIf { it.isNotBlank() } ?: fallback.ifBlank { "알 수 없음" }
 
     /** 0 for the room creator, 1 for the second member, -1 if unknown. */
-    fun memberIndex(uid: String): Int = members.indexOf(uid)
-
-    // ─────────────────────────────────────────────
-    // Migration from on-device storage
-    // ─────────────────────────────────────────────
-
-    /** Events from the old local-only version that have not been migrated yet. */
-    fun pendingLocalEvents(): List<Event> =
-        if (prefs.getBoolean("migrated", false)) emptyList() else localStore.load()
-
-    /** Uploads (or discards) old local events, then never asks again. */
-    fun migrateLocalEvents(upload: Boolean) {
-        if (upload) {
-            localStore.load().forEach { addEvent(it.date, it.time, it.title) }
-            localStore.clear()
-        }
-        prefs.edit().putBoolean("migrated", true).apply()
-    }
+    fun memberIndex(memberUid: String): Int = members.indexOf(memberUid)
 
     private fun randomCode(): String =
         (1..CODE_LENGTH).map { CODE_CHARS.random() }.joinToString("")
 
-    private companion object {
+    companion object {
         const val CODE_LENGTH = 6
+
         /** Excludes look-alike characters (0/O, 1/I/L). */
-        const val CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-        const val NETWORK_TIMEOUT_MS = 15_000L
-        const val CREATE_ATTEMPTS = 3
+        private const val CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+        private const val NETWORK_TIMEOUT_MS = 15_000L
+        private const val CREATE_ATTEMPTS = 3
+
+        private const val KEY_ROOM = "room"
+        private const val KEY_NAME = "name"
+
+        private const val MSG_OFFLINE = "인터넷 연결을 확인해 주세요."
+        private const val MSG_CREATE_FAILED = "달력을 만들지 못했어요."
+        private const val MSG_JOIN_FAILED = "참여하지 못했어요."
     }
 }

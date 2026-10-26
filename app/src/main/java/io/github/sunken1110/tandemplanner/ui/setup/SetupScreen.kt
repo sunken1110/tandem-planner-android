@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.sunken1110.tandemplanner.MAX_NAME_LENGTH
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.model.Season
@@ -47,9 +48,6 @@ import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import kotlinx.coroutines.launch
-
-/** Max characters for a display name. */
-private const val MAX_NAME_LENGTH = 12
 
 /**
  * First-run screen: enter a display name, then either create a new shared
@@ -112,7 +110,7 @@ fun SetupScreen(calendar: SharedCalendar) {
                 value = name,
                 onValueChange = { name = it.take(MAX_NAME_LENGTH); nameError = false },
                 label = { Text("내 이름") },
-                placeholder = { Text("민지") },
+                placeholder = { Text("하윤") },
                 singleLine = true,
                 isError = nameError,
                 supportingText = {
@@ -157,10 +155,10 @@ fun SetupScreen(calendar: SharedCalendar) {
             OutlinedTextField(
                 value = code,
                 onValueChange = {
-                    code = it.uppercase().filter { ch -> ch.isLetterOrDigit() }.take(6)
+                    code = it.uppercase().filter { ch -> ch.isLetterOrDigit() }.take(SharedCalendar.CODE_LENGTH)
                     codeError = null
                 },
-                label = { Text("공유 코드 6자리") },
+                label = { Text("공유 코드 ${SharedCalendar.CODE_LENGTH}자리") },
                 placeholder = { Text("K7M2QX") },
                 singleLine = true,
                 isError = codeError != null,
@@ -175,8 +173,8 @@ fun SetupScreen(calendar: SharedCalendar) {
             OutlinedButton(
                 onClick = {
                     if (!validName() || busy) return@OutlinedButton
-                    if (code.length != 6) {
-                        codeError = "코드 6자리를 입력해 주세요"
+                    if (code.length != SharedCalendar.CODE_LENGTH) {
+                        codeError = "코드 ${SharedCalendar.CODE_LENGTH}자리를 입력해 주세요"
                         haptics.reject()
                         return@OutlinedButton
                     }

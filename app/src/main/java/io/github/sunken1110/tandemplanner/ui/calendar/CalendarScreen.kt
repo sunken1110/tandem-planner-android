@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +58,7 @@ import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.model.isSeasonFirstDay
+import io.github.sunken1110.tandemplanner.ui.common.YearPaint
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
 import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
@@ -122,6 +122,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
         )
     }
     val fillProvider = remember { { fill.value } }
+    val paint = remember(today, yearColors) { YearPaint(today, yearColors, fillProvider) }
     val shownCount by remember(passedDays) { derivedStateOf { fill.value.toInt().coerceAtMost(passedDays) } }
 
     // ── Shared data ──
@@ -137,9 +138,6 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     // Open the share dialog once right after creating a calendar.
     var showShare by remember { mutableStateOf(calendar.justCreated) }
     LaunchedEffect(Unit) { calendar.justCreated = false }
-
-    // Offer to migrate events saved by the old local-only version.
-    var localToMigrate by remember { mutableStateOf(calendar.pendingLocalEvents()) }
 
     // null = year overview, 1..12 = expanded month.
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -183,10 +181,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             ) {
                 MonthDetail(
                     yearMonth = YearMonth.from(today),
-                    today = today,
-                    passedDays = passedDays,
-                    fillProvider = fillProvider,
-                    yearColors = yearColors,
+                    paint = paint,
                     eventsByDate = eventsByDate,
                     sharedScope = null,
                     animScope = null,
@@ -231,7 +226,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             )
             Spacer(Modifier.height(10.dp))
 
-            YearHeader(today, season, shownCount, passedDays, totalDays, yearColors, fillProvider)
+            YearHeader(paint = paint, shownCount = shownCount)
             Spacer(Modifier.height(14.dp))
 
             // Year ↔ month: the tapped card expands in place via shared bounds.
@@ -258,8 +253,10 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                     val animScope = this
                     if (month == null) {
                         YearGrid(
-                            year, today, passedDays, fillProvider, yearColors, eventsByDate,
-                            sharedScope, animScope,
+                            paint = paint,
+                            eventsByDate = eventsByDate,
+                            sharedScope = sharedScope,
+                            animScope = animScope,
                             onMonthClick = {
                                 haptics.tap()
                                 selectedMonth = it
@@ -268,10 +265,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                     } else {
                         MonthDetail(
                             yearMonth = YearMonth.of(year, month),
-                            today = today,
-                            passedDays = passedDays,
-                            fillProvider = fillProvider,
-                            yearColors = yearColors,
+                            paint = paint,
                             eventsByDate = eventsByDate,
                             sharedScope = sharedScope,
                             animScope = animScope,
@@ -326,33 +320,5 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     if (showShare) {
         ShareDialog(calendar = calendar, onDismiss = { showShare = false })
     }
-
-    if (localToMigrate.isNotEmpty() && !showShare) {
-        MigrationDialog(
-            count = localToMigrate.size,
-            onMigrate = {
-                haptics.confirm()
-                calendar.migrateLocalEvents(upload = true)
-                localToMigrate = emptyList()
-            },
-            onSkip = {
-                calendar.migrateLocalEvents(upload = false)
-                localToMigrate = emptyList()
-            }
-        )
-    }
 }
 
-/** One-time prompt to move events from the old on-device storage into the shared calendar. */
-@Composable
-private fun MigrationDialog(count: Int, onMigrate: () -> Unit, onSkip: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = {},
-        title = { Text("이 폰에 저장된 일정이 있어요") },
-        text = {
-            Text("예전 버전에서 이 폰에만 저장한 일정 ${count}개가 있어요. 공동 달력으로 옮길까요? 옮기면 함께 쓰는 사람도 볼 수 있어요.")
-        },
-        confirmButton = { TextButton(onClick = onMigrate) { Text("옮기기") } },
-        dismissButton = { TextButton(onClick = onSkip) { Text("옮기지 않기") } }
-    )
-}

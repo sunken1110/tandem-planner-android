@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -33,12 +31,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.sunken1110.tandemplanner.MAX_NAME_LENGTH
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.ui.common.MemberDot
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.common.memberLabel
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
-
-/** Max characters for a display name (keep in sync with the setup screen). */
-private const val MAX_NAME_LENGTH = 12
 
 /**
  * Share dialog: shows the room code (copy / send via any app),
@@ -102,17 +100,9 @@ fun ShareDialog(calendar: SharedCalendar, onDismiss: () -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 calendar.members.forEach { uid ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 3.dp)) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(calendar.colorOf(uid))
-                        )
+                        MemberDot(color = calendar.colorOf(uid), size = 10.dp)
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            calendar.displayName(uid, "") + if (uid == calendar.uid) " (나)" else "",
-                            fontSize = 15.sp
-                        )
+                        Text(calendar.memberLabel(uid), fontSize = 15.sp)
                     }
                 }
                 if (calendar.members.size < 2) {
