@@ -29,12 +29,30 @@
 ### Shared calendar for two
 - One person creates a calendar and gets a 6-character code; the other joins with it.
 - Events sync in real time through Cloud Firestore.
-- Each member has an accent color. Event dots and author chips show who added what.
+- Each member has an accent color, used to show who added what:
+  - Year view: a thin bar under each day, split into up to three segments in display order.
+  - Month view: up to two titles as small chips — each member's first event when both have one,
+    otherwise that member's first two — plus "+N" for the rest.
+  - Display order: all-day events (no time, shown as "하루 종일") first, then by time.
 - **Offline-first:** events can be read and added without a connection, and they sync automatically when it comes back.
 
 ### Month view and events
 - Tap a month to expand it in place (shared-element transition), and swipe through months with the arrows.
-- Tap a day to see and add its events (title plus an optional time).
+  Going back always shrinks into the right card: the year grid keeps its scroll position and scrolls the card into view first.
+- Today's date number sits in a dark, season-toned circle; the selected day has a floating ring in the season's color that glides between cells (a deep ring with a soft glow in light mode, a neon tube in dark mode); every few seconds a light runs around it while its glow breathes.
+- Tap a day to see and add its events in a bottom-sheet editor. The page scrolls once so the whole list is visible.
+- Tap an event in the list to edit its date, time or title in the same sheet; it keeps its original author.
+  When the other member edits it, the row notes who did and what the author originally wrote
+  (e.g. "민지가 수정함 · 원래 오후 7:00"). Repeated edits keep pointing at the author's version;
+  the note disappears if the author edits it or it's changed back to the original.
+- **Time without typing**: "시간 없음 / 시간 지정" toggle, then iOS-style 오전/오후, hour and minute wheels (5-minute steps; 오전/오후 also flips on tap) with a haptic tick per step. Wheels are cyclic, rows can be tapped, and the hour wheel walks through the whole day (오전 11 → 오후 12 switches 오전/오후 on its own).
+- **Time recall**: while you type a title, the sheet suggests the time of past events with the same or a similar title (e.g. "필라테스" → 오후 8:00), shown as a small "과거 이력 기반 추천" hint. It stays quiet when past times disagree.
+
+### Quick add
+- A floating one-line input: type *"내일 저녁 7시 민지랑 저녁"* and the date, time and title are filled in.
+- A live preview under your fingers shows how the sentence was understood before you submit.
+- The result opens in the same editor sheet, so anything misread is fixed with a tap or a wheel spin.
+- Parsing is behind an `EventParser` interface; today it is rule-based, and it is designed to be swapped for an AI model.
 - Weekend day numbers are always colored (Sunday red, Saturday sky blue).
 
 ### Polish
@@ -53,7 +71,8 @@
 - [ ] "Update required" gate driven by a minimum version in Firestore
 - [ ] Google Sign-In, so membership survives reinstalls
 - [ ] **AI-assisted planning**
-  - [ ] Natural-language event entry (e.g. *"Dinner with Minji tomorrow at 7"* → date, time and title filled in)
+  - [x] Natural-language quick add (rule-based `EventParser`)
+  - [ ] LLM-backed `EventParser` (pasted chat messages, multiple events per sentence, fuzzy phrasing)
   - [ ] Weekly / monthly summaries of shared plans
   - [ ] On-device models where possible, for privacy
 - [ ] Home-screen widget (Jetpack Glance)
@@ -80,18 +99,25 @@
 app/src/main/java/io/github/sunken1110/tandemplanner/
 ├─ MainActivity.kt          # Entry point: splash → intro → setup or calendar
 ├─ AppConfig.kt             # Tunables: animation timing, debug date override
+├─ ai/
+│   ├─ EventParser.kt       # Sentence → EventDraft interface (the AI seam)
+│   ├─ RuleBasedEventParser.kt  # Regex-based Korean date/time extraction
+│   └─ TimeRecall.kt        # Suggests a time from past events with similar titles
 ├─ model/
 │   └─ Season.kt            # Seasons, season boundaries, per-day color
 ├─ data/
 │   ├─ Event.kt             # Event model
+│   ├─ EventDraft.kt        # Unsaved event (date, optional time, title)
 │   └─ SharedCalendar.kt    # Firebase repository: auth, rooms, real-time events
 └─ ui/
     ├─ theme/               # Material theme + calendar/member colors
-    ├─ common/              # DayCell, MonthGrid, YearPaint, member helpers, labels
+    ├─ common/              # DayCell, MonthGrid, EventMarks, WheelPicker, YearPaint, time/member helpers
+    ├─ editor/              # Event editor bottom sheet, time wheel
+    ├─ quickadd/            # Floating natural-language input with live preview
     ├─ effects/             # Seasonal particles, intro overlay, haptics
     ├─ calendar/            # CalendarScreen: screen state and year↔month switching
     ├─ year/                # Year header, progress bar, 12-month grid
-    ├─ month/               # Month view, event row, add-event dialog
+    ├─ month/               # Month view, event row, selection ring
     ├─ setup/               # Create / join a shared calendar
     └─ share/               # Member bar and share dialog
 ```

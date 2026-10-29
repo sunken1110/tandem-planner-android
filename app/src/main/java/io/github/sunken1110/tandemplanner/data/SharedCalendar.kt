@@ -203,7 +203,16 @@ class SharedCalendar(context: Context) {
                         time = d.getString("time").orEmpty(),
                         title = d.getString("title").orEmpty(),
                         authorUid = d.getString("authorUid").orEmpty(),
-                        authorName = d.getString("authorName").orEmpty()
+                        authorName = d.getString("authorName").orEmpty(),
+                        editedByUid = d.getString("editedByUid"),
+                        editedByName = d.getString("editedByName"),
+                        original = (d.get("original") as? Map<*, *>)?.let { m ->
+                            val originalDate = (m["date"] as? String)
+                                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                            originalDate?.let {
+                                EventSnapshot(it, m["time"] as? String ?: "", m["title"] as? String ?: "")
+                            }
+                        }
                     )
                 }
                 events.clear()
@@ -234,6 +243,48 @@ class SharedCalendar(context: Context) {
                 )
             )
             .addOnFailureListener { reportError("일정을 저장하지 못했어요.", it) }
+    }
+
+    /**
+     * Changes an event's date, time and title. The author never changes, so the
+     * event keeps the author's color.
+     *
+     * Edit history (all fields are additive; older app versions ignore them):
+     * - The other member edits → `editedByUid`/`editedByName` record who, and
+     *   `original` stores the author's version. It is written only on the first
+     *   such edit, so repeated edits still point back to what the author wrote.
+     * - That member changes it back to exactly the original → the marks are removed.
+     * - The author edits → their new version is the one that counts, so the marks
+     *   are removed too.
+     */
+    fun updateEvent(event: Event, date: LocalDate, time: String, title: String) {
+        val code = roomCode ?: return
+        val me = uid ?: return
+        val next = EventSnapshot(date, time, title)
+        val updates = mutableMapOf<String, Any>(
+            "date" to date.toString(),
+            "time" to time,
+            "title" to title,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        val original = event.original ?: event.snapshot()
+        val clearMarks = me == event.authorUid || next == original
+        if (clearMarks) {
+            updates["original"] = FieldValue.delete()
+            updates["editedByUid"] = FieldValue.delete()
+            updates["editedByName"] = FieldValue.delete()
+        } else {
+            updates["original"] = mapOf(
+                "date" to original.date.toString(),
+                "time" to original.time,
+                "title" to original.title
+            )
+            updates["editedByUid"] = me
+            updates["editedByName"] = myName
+        }
+        room(code).collection("events").document(event.id)
+            .update(updates)
+            .addOnFailureListener { reportError("일정을 수정하지 못했어요.", it) }
     }
 
     fun deleteEvent(event: Event) {

@@ -110,7 +110,6 @@ fun SetupScreen(calendar: SharedCalendar) {
                 value = name,
                 onValueChange = { name = it.take(MAX_NAME_LENGTH); nameError = false },
                 label = { Text("내 이름") },
-                placeholder = { Text("하윤") },
                 singleLine = true,
                 isError = nameError,
                 supportingText = {
@@ -159,7 +158,6 @@ fun SetupScreen(calendar: SharedCalendar) {
                     codeError = null
                 },
                 label = { Text("공유 코드 ${SharedCalendar.CODE_LENGTH}자리") },
-                placeholder = { Text("K7M2QX") },
                 singleLine = true,
                 isError = codeError != null,
                 supportingText = {

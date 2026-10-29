@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -36,7 +37,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,17 +55,24 @@ import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.DEBUG_TODAY
 import io.github.sunken1110.tandemplanner.FADE_DAYS
 import io.github.sunken1110.tandemplanner.FILL_DURATION_MS
+import io.github.sunken1110.tandemplanner.ai.EventParser
+import io.github.sunken1110.tandemplanner.ai.RuleBasedEventParser
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.Event
+import io.github.sunken1110.tandemplanner.data.EventDraft
+import io.github.sunken1110.tandemplanner.data.sortedByTime
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.model.isSeasonFirstDay
 import io.github.sunken1110.tandemplanner.ui.common.YearPaint
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.common.toStoredTime
 import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
+import io.github.sunken1110.tandemplanner.ui.editor.EventEditorSheet
 import io.github.sunken1110.tandemplanner.ui.month.MonthDetail
+import io.github.sunken1110.tandemplanner.ui.quickadd.QuickAddBar
 import io.github.sunken1110.tandemplanner.ui.share.ShareDialog
 import io.github.sunken1110.tandemplanner.ui.share.SharedBar
 import io.github.sunken1110.tandemplanner.ui.year.SeasonBanner
@@ -74,6 +84,9 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import kotlin.time.Duration.Companion.milliseconds
+
+/** Space kept free at the bottom for the floating quick-add bar. */
+private val QUICK_ADD_CLEARANCE = 64.dp
 
 /** How long an error message stays on screen. */
 private const val ERROR_VISIBLE_MS = 6_000
@@ -131,7 +144,10 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
         val listeners = calendar.startListening()
         onDispose { listeners.forEach { it.remove() } }
     }
-    val eventsByDate by remember { derivedStateOf { calendar.events.groupBy { it.date } } }
+    // Each day's events are sorted once here, so every view shows them in time order.
+    val eventsByDate by remember {
+        derivedStateOf { calendar.events.groupBy { it.date }.mapValues { (_, list) -> list.sortedByTime() } }
+    }
     val memberColor: (String) -> Color = { calendar.colorOf(it) }
     val nameOf: (Event) -> String = { calendar.displayName(it.authorUid, it.authorName) }
 
@@ -141,7 +157,39 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
 
     // null = year overview, 1..12 = expanded month.
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(null) }
-    BackHandler(enabled = selectedMonth != null) { selectedMonth = null }
+
+    // Year grid scroll position, kept here because the grid is disposed while a month is open.
+    val yearGridState = rememberLazyGridState()
+
+    /**
+     * Back to the year view. The card-shrink animation needs the month's card to
+     * be on screen (the lazy grid only creates visible cards), so scroll it into
+     * view first; the request is applied on the grid's very first layout.
+     */
+    fun backToYear() {
+        val month = selectedMonth ?: return
+        val index = month - 1
+        val info = yearGridState.layoutInfo
+        val card = info.visibleItemsInfo.firstOrNull { it.index == index }
+        val fullyVisible = card != null &&
+            card.offset.y >= info.viewportStartOffset &&
+            card.offset.y + card.size.height <= info.viewportEndOffset
+        if (!fullyVisible) yearGridState.requestScrollToItem(index)
+        selectedMonth = null
+    }
+
+    BackHandler(enabled = selectedMonth != null) { backToYear() }
+
+    // Quick-add: the parsed draft waiting for confirmation, and the date to
+    // highlight after saving it.
+    val parser: EventParser = remember { RuleBasedEventParser }
+    var quickDraft by remember { mutableStateOf<EventDraft?>(null) }
+    var focusDate by remember { mutableStateOf<LocalDate?>(null) }
+    // Forget a quick-add focus date once the user returns to the year view.
+    LaunchedEffect(selectedMonth) { if (selectedMonth == null) focusDate = null }
+    val saveDraft: (EventDraft) -> Unit = { d ->
+        calendar.addEvent(d.date, d.time?.toStoredTime().orEmpty(), d.title)
+    }
 
     val bgTint by animateColorAsState(
         targetValue = dayColor(today).copy(alpha = if (dark) 0.08f else 0.12f),
@@ -187,7 +235,8 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                     animScope = null,
                     colorOf = memberColor,
                     nameOf = nameOf,
-                    onAddEvent = { _, _, _ -> },
+                    onAddEvent = {},
+                    onUpdateEvent = { _, _ -> },
                     onDeleteEvent = {},
                     onBack = {},
                     onPrev = {},
@@ -205,6 +254,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                 .fillMaxSize()
                 .systemBarsPadding()
                 .padding(horizontal = 14.dp, vertical = 16.dp)
+                .padding(bottom = QUICK_ADD_CLEARANCE)
         ) {
             AnimatedVisibility(
                 visible = showBanner,
@@ -255,6 +305,8 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                         YearGrid(
                             paint = paint,
                             eventsByDate = eventsByDate,
+                            colorOf = memberColor,
+                            state = yearGridState,
                             sharedScope = sharedScope,
                             animScope = animScope,
                             onMonthClick = {
@@ -271,9 +323,14 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                             animScope = animScope,
                             colorOf = memberColor,
                             nameOf = nameOf,
-                            onAddEvent = { date, time, title -> calendar.addEvent(date, time, title) },
+                            editorNameOf = { e -> e.editedByUid?.let { calendar.displayName(it, e.editedByName.orEmpty()) } },
+                            initialSelectedDate = focusDate,
+                            onAddEvent = saveDraft,
+                            onUpdateEvent = { event, d ->
+                                calendar.updateEvent(event, d.date, d.time?.toStoredTime().orEmpty(), d.title)
+                            },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
-                            onBack = { selectedMonth = null },
+                            onBack = { backToYear() },
                             onPrev = { if (month > 1) selectedMonth = month - 1 },
                             onNext = { if (month < 12) selectedMonth = month + 1 }
                         )
@@ -281,6 +338,18 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                 }
             }
         }
+
+        // ── Quick-add bar ──
+        QuickAddBar(
+            parser = parser,
+            today = today,
+            onSubmit = { quickDraft = it },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        )
 
         // ── Error toast ──
         val error = calendar.lastError
@@ -291,7 +360,8 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = QUICK_ADD_CLEARANCE + 8.dp)
         ) {
             Row(
                 Modifier
@@ -319,6 +389,25 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
 
     if (showShare) {
         ShareDialog(calendar = calendar, onDismiss = { showShare = false })
+    }
+
+    quickDraft?.let { draft ->
+        key(draft) {
+            EventEditorSheet(
+            initial = draft,
+            history = calendar.events,
+            onDismiss = { quickDraft = null },
+            onSave = { saved ->
+                saveDraft(saved)
+                quickDraft = null
+                // Jump to the event's month so the new dot is visible.
+                if (saved.date.year == year) {
+                    focusDate = saved.date
+                    selectedMonth = saved.date.monthValue
+                }
+            }
+        )
+        }
     }
 }
 

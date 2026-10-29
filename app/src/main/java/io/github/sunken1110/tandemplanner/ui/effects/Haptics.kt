@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalContext
  */
 class Haptics(context: Context) {
 
-    private enum class Kind { TAP, CONFIRM, REJECT }
+    private enum class Kind { TICK, TAP, CONFIRM, REJECT }
 
     private val vibrator: Vibrator? =
         if (Build.VERSION.SDK_INT >= 31) {
@@ -36,6 +36,7 @@ class Haptics(context: Context) {
         if (Build.VERSION.SDK_INT >= 29) {
             // Predefined effects (API 29+) are referenced only inside this check.
             val effect = when (kind) {
+                Kind.TICK -> VibrationEffect.EFFECT_TICK
                 Kind.TAP -> VibrationEffect.EFFECT_CLICK
                 Kind.CONFIRM -> VibrationEffect.EFFECT_HEAVY_CLICK
                 Kind.REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK
@@ -44,6 +45,7 @@ class Haptics(context: Context) {
         } else {
             // Fallback for API 26–28: one-shot pulses approximating each effect.
             val (durationMs, amplitude) = when (kind) {
+                Kind.TICK -> 5L to 60
                 Kind.TAP -> 12L to 120
                 Kind.CONFIRM -> 25L to 255
                 Kind.REJECT -> 40L to 180
@@ -52,7 +54,10 @@ class Haptics(context: Context) {
         }
     }
 
-    /** Light tick: buttons, date selection. */
+    /** Very light tick: each step of a scrolling wheel. */
+    fun tick() = play(Kind.TICK)
+
+    /** Light click: buttons, date selection. */
     fun tap() = play(Kind.TAP)
 
     /** Firm click: successful save. */

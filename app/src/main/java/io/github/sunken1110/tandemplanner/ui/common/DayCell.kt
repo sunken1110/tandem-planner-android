@@ -39,9 +39,10 @@ import java.time.LocalDate
  * - Unfilled: a faint tint of the day's season color.
  * - Filled (past days, incl. today): a diagonal light-to-base gradient that
  *   fades in as the year fill animation passes this day.
- * - Today: a light sweep (shimmer) across the cell every few seconds.
+ * - Today: a light sweep (shimmer) across the cell every few seconds, plus an
+ *   outline unless [showTodayOutline] is false (the month view marks today with
+ *   a number badge instead, and draws its own selection ring).
  * - Dark mode: a soft radial glow behind filled cells.
- * - Selected: a primary-color outline (takes precedence over today's outline).
  *
  * Performance: all drawing happens in the draw phase via [drawWithCache], and
  * [YearPaint.fill] is read only there, so the animation never triggers recomposition.
@@ -53,7 +54,7 @@ fun DayCell(
     corner: Dp,
     borderWidth: Dp,
     modifier: Modifier = Modifier,
-    isSelected: Boolean = false,
+    showTodayOutline: Boolean = true,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     val base = paint.colorOf(date)
@@ -67,7 +68,7 @@ fun DayCell(
     val glow = remember(base) { base.copy(alpha = 0.5f) }
     val faint = remember(base, dark) { base.copy(alpha = if (dark) 0.10f else 0.14f) }
     val outline = MaterialTheme.colorScheme.onSurface
-    val selectedColor = MaterialTheme.colorScheme.primary
+    val drawOutline = isToday && showTodayOutline
 
     val shimmer: State<Float>? = if (isToday) {
         rememberInfiniteTransition(label = "todayShimmer").animateFloat(
@@ -133,14 +134,9 @@ fun DayCell(
                         }
                     }
 
-                    val strokeColor = when {
-                        isSelected -> selectedColor
-                        isToday -> outline.copy(alpha = 0.85f)
-                        else -> null
-                    }
-                    if (strokeColor != null) {
+                    if (drawOutline) {
                         drawRoundRect(
-                            color = strokeColor,
+                            color = outline.copy(alpha = 0.85f),
                             topLeft = strokeTopLeft,
                             size = strokeSize,
                             cornerRadius = cr,
