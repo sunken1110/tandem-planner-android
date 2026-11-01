@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown in the home screen's widget picker. -->
+    <string name="widget_name">Tandem D-day</string>
+    <string name="widget_description">다음 일정까지 남은 날과 다가오는 일정을 보여 줘요</string>
+</resources>

@@ -53,6 +53,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /** Wait this long after typing stops before re-parsing (keeps future AI calls cheap). */
 private const val PREVIEW_DEBOUNCE_MS = 250
@@ -69,10 +72,21 @@ fun QuickAddBar(
     parser: EventParser,
     today: LocalDate,
     onSubmit: (EventDraft) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequest: Int = 0
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    // Bumping [focusRequest] (the widget's "+") puts the cursor here and opens the keyboard.
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(focusRequest) {
+        if (focusRequest == 0) return@LaunchedEffect
+        // Give the screen a moment to settle after launch before taking focus.
+        delay(300.milliseconds)
+        runCatching { focusRequester.requestFocus() }
+        keyboard?.show()
+    }
     var text by rememberSaveable { mutableStateOf("") }
     var preview by remember { mutableStateOf<EventDraft?>(null) }
 
@@ -101,7 +115,7 @@ fun QuickAddBar(
             enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
             exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
         ) {
-            preview?.let { PreviewRow(it) }
+            preview?.let { PreviewRow(it, today) }
         }
 
         Surface(
@@ -133,7 +147,9 @@ fun QuickAddBar(
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
                     decorationBox = { field ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (text.isEmpty()) {
@@ -159,7 +175,7 @@ fun QuickAddBar(
 
 /** "10월 27일 (화) · 오후 7:00 · 민지랑 저녁" as small pills above the bar. */
 @Composable
-private fun PreviewRow(draft: EventDraft) {
+private fun PreviewRow(draft: EventDraft, today: LocalDate) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -168,8 +184,14 @@ private fun PreviewRow(draft: EventDraft) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         val date = draft.date
-        PreviewPill("${date.monthValue}월 ${date.dayOfMonth}일 (${date.dayOfWeek.koreanShort()})")
-        PreviewPill(draft.time?.koreanLabel() ?: "시간 없음")
+        // The year is shown only when it isn't this year, so a date that lands in
+        // another year is obvious before saving.
+        val year = if (date.year != today.year) "${date.year}년 " else ""
+        val end = draft.endDate?.let { e ->
+            " ~ " + (if (e.monthValue != date.monthValue || e.year != date.year) "${e.monthValue}월 " else "") + "${e.dayOfMonth}일"
+        } ?: ""
+        PreviewPill("$year${date.monthValue}월 ${date.dayOfMonth}일 (${date.dayOfWeek.koreanShort()})$end")
+        PreviewPill(if (draft.endDate != null) "하루 종일" else draft.time?.koreanLabel() ?: "시간 없음")
         Text(
             draft.title,
             fontSize = 13.sp,

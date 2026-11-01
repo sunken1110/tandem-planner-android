@@ -1,6 +1,7 @@
 package io.github.sunken1110.tandemplanner
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,6 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.ui.calendar.LaunchRequest
+import io.github.sunken1110.tandemplanner.widget.WidgetExtras
+import java.time.LocalDate
 import io.github.sunken1110.tandemplanner.ui.calendar.CalendarScreen
 import io.github.sunken1110.tandemplanner.ui.effects.IntroOverlay
 import io.github.sunken1110.tandemplanner.ui.setup.SetupScreen
@@ -37,6 +41,26 @@ import io.github.sunken1110.tandemplanner.ui.theme.TandemPlannerTheme
  * shared calendar) or the main calendar screen.
  */
 class MainActivity : ComponentActivity() {
+
+    /**
+     * What a home-screen widget tap asked for (a day to open, or quick add).
+     * Set on launch and again when the widget is tapped while the app is open.
+     */
+    private var launchRequest by mutableStateOf<LaunchRequest?>(null)
+
+    /** The widget was tapped while the app was already running (launchMode="singleTop"). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launchRequest = intent.toLaunchRequest()
+    }
+
+    private fun Intent.toLaunchRequest(): LaunchRequest? {
+        val date = getStringExtra(WidgetExtras.DATE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val quickAdd = getBooleanExtra(WidgetExtras.QUICK_ADD, false)
+        return if (date == null && !quickAdd) null
+        else LaunchRequest(date = date, quickAdd = quickAdd, token = System.nanoTime())
+    }
 
     @SuppressLint("DiscouragedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,6 +79,10 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
+        // Opened from the widget: go straight to the requested day (no intro image).
+        if (savedInstanceState == null) launchRequest = intent.toLaunchRequest()
+        val fromWidget = launchRequest != null
+
         // Optional resources looked up by name so the app still runs without them.
         // - res/drawable-nodpi/splash_bg.*  → full-screen intro image
         // - res/values/colors.xml splash_background → shared splash/intro backdrop color
@@ -65,7 +93,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // Dynamic (wallpaper-based) color is off so seasonal colors stay consistent.
             TandemPlannerTheme(dynamicColor = false) {
-                var showIntro by rememberSaveable { mutableStateOf(introImage != 0) }
+                var showIntro by rememberSaveable { mutableStateOf(introImage != 0 && !fromWidget) }
 
                 // Main content fades in while the intro fades out (cross-fade).
                 val mainAlpha by animateFloatAsState(
@@ -87,7 +115,12 @@ class MainActivity : ComponentActivity() {
                             ) { joined ->
                                 if (joined) {
                                     // The year fill animation waits until the intro is gone.
-                                    CalendarScreen(calendar = calendar, startFill = !showIntro)
+                                    CalendarScreen(
+                                        calendar = calendar,
+                                        startFill = !showIntro,
+                                        launchRequest = launchRequest,
+                                        onLaunchHandled = { launchRequest = null }
+                                    )
                                 } else {
                                     SetupScreen(calendar = calendar)
                                 }

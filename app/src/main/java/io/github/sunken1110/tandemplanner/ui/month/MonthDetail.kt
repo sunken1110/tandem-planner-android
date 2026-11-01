@@ -65,9 +65,15 @@ import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.DEBUG_GLOW_NO_BLUR
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
+import io.github.sunken1110.tandemplanner.model.KoreanHolidays
 import io.github.sunken1110.tandemplanner.model.Season
+import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
+import androidx.compose.ui.text.style.TextOverflow
 import io.github.sunken1110.tandemplanner.ui.common.DayCell
 import io.github.sunken1110.tandemplanner.ui.common.EventTitleChips
+import io.github.sunken1110.tandemplanner.ui.common.MoreBadge
+import io.github.sunken1110.tandemplanner.ui.common.SLOT_INSET
+import io.github.sunken1110.tandemplanner.ui.common.CELL_SLOTS
 import io.github.sunken1110.tandemplanner.ui.common.MonthGrid
 import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaderRow
 import io.github.sunken1110.tandemplanner.ui.common.YearPaint
@@ -199,6 +205,7 @@ fun MonthDetail(
     colorOf: (String) -> Color,
     nameOf: (Event) -> String,
     editorNameOf: (Event) -> String? = { it.editedByName },
+    isMine: (Event) -> Boolean = { true },
     onAddEvent: (EventDraft) -> Unit,
     onUpdateEvent: (Event, EventDraft) -> Unit,
     onDeleteEvent: (Event) -> Unit,
@@ -223,6 +230,12 @@ fun MonthDetail(
     var showAddDialog by remember { mutableStateOf(false) }
     // The event being edited in the sheet, or null.
     var editingEvent by remember { mutableStateOf<Event?>(null) }
+    // The event whose delete button was tapped, waiting for confirmation.
+    var deletingEvent by remember { mutableStateOf<Event?>(null) }
+    // Rows of this month's multi-day bands; recomputed only when the events change.
+    val bandLayout = remember(yearMonth, eventsByDate) {
+        layoutBands(yearMonth, eventsByDate.values.flatten())
+    }
 
     // ── Auto-scroll so the selected day's events are fully visible ──
     // Bumped on each day tap (and on open when a specific date was requested);
@@ -376,7 +389,7 @@ fun MonthDetail(
     ) {
         // ── Navigation ──
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹ 1년 보기") }
+            TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹ ${yearMonth.year}년") }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1) {
                 Text("‹", fontSize = 20.sp)
@@ -461,25 +474,76 @@ fun MonthDetail(
                                 revealRequest++
                             }
                     ) {
-                        DayNumber(
-                            day = date.dayOfMonth,
-                            color = dayNumberColor(column = column, isPast = isPast),
-                            isPast = isPast,
-                            todayBadge = if (isToday) deepTone(paint.colorOf(date)) else null,
-                            modifier = Modifier
+                        // Public holidays: a red number, like Sundays, and a short name beside it.
+                        val holiday = KoreanHolidays.of(date)
+                        Row(
+                            Modifier
                                 .align(Alignment.TopStart)
-                                .padding(start = 3.dp, top = 3.dp)
-                        )
-                        // Up to two titles in their authors' colors, plus "+N" for the rest.
+                                .padding(start = 3.dp, top = 3.dp, end = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            DayNumber(
+                                day = date.dayOfMonth,
+                                color = if (holiday != null) SundayRed else dayNumberColor(column = column, isPast = isPast),
+                                isPast = isPast,
+                                todayBadge = if (isToday) deepTone(paint.colorOf(date)) else null
+                            )
+                            if (holiday != null) {
+                                Text(
+                                    holiday.short,
+                                    fontSize = 7.sp,
+                                    lineHeight = 8.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = SundayRed,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Clip,
+                                    modifier = Modifier
+                                        .padding(start = 1.dp, top = 1.dp)
+                                        .then(
+                                            // Same faint backing as the day number on filled (past) cells.
+                                            if (isPast) Modifier.background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(3.dp))
+                                            else Modifier
+                                        )
+                                        .padding(horizontal = 1.dp)
+                                )
+                            }
+                        }
+                        // One-day events as titles in their authors' colors, in the rows
+                        // the multi-day bands (drawn over the grid) leave free, plus "+N".
+                        val blocked = bandLayout.blockedSlots(date)
+                        val hidden = bandLayout.hiddenCount(date)
+                        val singles = eventsByDate[date].orEmpty().filter { !it.isMultiDay }
                         EventTitleChips(
-                            events = eventsByDate[date].orEmpty(),
+                            events = singles,
                             colorOf = colorOf,
+                            blockedSlots = blocked,
+                            hiddenCount = hidden,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(start = 3.dp, end = 3.dp, bottom = 3.dp)
+                                .padding(start = SLOT_INSET, end = SLOT_INSET, bottom = SLOT_INSET)
                         )
+                        // Every row is taken by bands: show the count by the day number instead.
+                        val overflow = singles.size + hidden
+                        if (blocked.size >= CELL_SLOTS && overflow > 0) {
+                            MoreBadge(
+                                overflow,
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 4.dp, end = 3.dp)
+                            )
+                        }
                     }
                 }
+                // Multi-day events as continuous bands over the cells (part of the grid layer).
+                MonthBands(
+                    yearMonth = yearMonth,
+                    layout = bandLayout,
+                    cellPx = cellPx,
+                    gapPx = gapPx,
+                    colorOf = colorOf,
+                    modifier = Modifier.matchParentSize()
+                )
             }
 
             // Glow layers are only as big as the ring plus room for the blur, with the
@@ -584,11 +648,13 @@ fun MonthDetail(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val dow = selectedDate.dayOfWeek
+                    val holiday = KoreanHolidays.of(selectedDate)
                     Text(
-                        "${selectedDate.monthValue}월 ${selectedDate.dayOfMonth}일 (${dow.koreanShort()})",
+                        "${selectedDate.monthValue}월 ${selectedDate.dayOfMonth}일 (${dow.koreanShort()})" +
+                            (holiday?.let { " · ${it.name}" } ?: ""),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
-                        color = dow.weekendColor() ?: MaterialTheme.colorScheme.onSurface,
+                        color = if (holiday != null) SundayRed else dow.weekendColor() ?: MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(start = 4.dp)
                     )
                     Spacer(Modifier.weight(1f))
@@ -616,6 +682,7 @@ fun MonthDetail(
                             dayEvents.forEach { e ->
                                 EventRow(
                                     event = e,
+                                    day = selectedDate,
                                     accent = accent,
                                     authorName = nameOf(e),
                                     authorColor = colorOf(e.authorUid),
@@ -625,8 +692,8 @@ fun MonthDetail(
                                         editingEvent = e
                                     },
                                     onDelete = {
-                                        haptics.reject()
-                                        onDeleteEvent(e)
+                                        haptics.tap()
+                                        deletingEvent = e
                                     }
                                 )
                             }
@@ -641,7 +708,7 @@ fun MonthDetail(
     if (showAddDialog) {
         EventEditorSheet(
             initial = EventDraft(date = selectedDate, time = null, title = ""),
-            history = remember(eventsByDate) { eventsByDate.values.flatten() },
+            history = remember(eventsByDate) { eventsByDate.values.flatten().distinctBy { it.id } },
             onDismiss = { showAddDialog = false },
             onSave = { draft ->
                 onAddEvent(draft)
@@ -659,12 +726,13 @@ fun MonthDetail(
                         time = parsed,
                         title = event.title,
                         // Keep a free-form legacy time ("저녁쯤") unless the user changes it.
-                        rawTime = event.time.takeIf { parsed == null && it.isNotBlank() }
+                        rawTime = event.time.takeIf { parsed == null && it.isNotBlank() },
+                        endDate = event.endDate
                     )
                 },
                 // Leave the event itself out, so it doesn't "suggest" its own old time.
                 history = remember(eventsByDate, event.id) {
-                    eventsByDate.values.flatten().filter { it.id != event.id }
+                    eventsByDate.values.flatten().filter { it.id != event.id }.distinctBy { it.id }
                 },
                 onDismiss = { editingEvent = null },
                 onSave = { draft ->
@@ -674,6 +742,20 @@ fun MonthDetail(
                 saveLabel = "수정"
             )
         }
+    }
+
+    deletingEvent?.let { event ->
+        DeleteEventDialog(
+            event = event,
+            authorName = nameOf(event),
+            isMine = isMine(event),
+            onConfirm = {
+                haptics.reject()
+                onDeleteEvent(event)
+                deletingEvent = null
+            },
+            onDismiss = { deletingEvent = null }
+        )
     }
 }
 

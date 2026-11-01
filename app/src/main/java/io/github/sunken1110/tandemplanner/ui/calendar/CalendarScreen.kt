@@ -62,7 +62,15 @@ import io.github.sunken1110.tandemplanner.ai.RuleBasedEventParser
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
-import io.github.sunken1110.tandemplanner.data.sortedByTime
+import io.github.sunken1110.tandemplanner.data.groupByDay
+import io.github.sunken1110.tandemplanner.widget.WidgetUpdater
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import io.github.sunken1110.tandemplanner.data.nextUpcoming
+import java.time.LocalTime
+import kotlin.time.Duration.Companion.seconds
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
@@ -111,9 +119,14 @@ private const val WARM_UP_MS = 1200
  * @param startFill the year fill animation starts only when this becomes true
  *        (i.e. after the intro overlay is gone).
  */
-@OptIn(ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalSharedTransitionApi::class, FlowPreview::class)
 @Composable
-fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
+fun CalendarScreen(
+    calendar: SharedCalendar,
+    startFill: Boolean = true,
+    launchRequest: LaunchRequest? = null,
+    onLaunchHandled: () -> Unit = {}
+) {
     // "Today", refreshed automatically at midnight (unless a debug date is set).
     var today by remember { mutableStateOf(currentDate()) }
     // The midnight timer below pauses while the phone is in deep sleep, so also
@@ -159,8 +172,21 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
         onDispose { listeners.forEach { it.remove() } }
     }
     // Each day's events are sorted once here, so every view shows them in time order.
+    // A multi-day event is listed under every day it covers.
     val eventsByDate by remember {
-        derivedStateOf { calendar.events.groupBy { it.date }.mapValues { (_, list) -> list.sortedByTime() } }
+        derivedStateOf { calendar.events.toList().groupByDay() }
+    }
+    // The D-day card's event. The clock is re-read every minute, so today's timed
+    // events drop off the card once their time has passed.
+    var minuteNow by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay((60 - LocalTime.now().second).seconds)
+            minuteNow = LocalTime.now()
+        }
+    }
+    val nextEvent by remember(today, minuteNow) {
+        derivedStateOf { calendar.events.toList().nextUpcoming(today, minuteNow) }
     }
     val memberColor: (String) -> Color = { calendar.colorOf(it) }
     val nameOf: (Event) -> String = { calendar.displayName(it.authorUid, it.authorName) }
@@ -208,8 +234,29 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     var focusToken by remember { mutableIntStateOf(0) }
     // Forget a quick-add focus date once the user returns to the year view.
     LaunchedEffect(selectedMonth) { if (selectedMonth == null) focusDate = null }
+    // ── Home-screen widget ──
+    // Keep the widget's copy of the events current (shortly after changes settle).
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        snapshotFlow { calendar.events.toList() to calendar.members }
+            .debounce(800.milliseconds)
+            .collect { runCatching { WidgetUpdater.publish(context, calendar) } }
+    }
+    // A widget tap: open the requested day (this year only), or focus quick add.
+    var quickAddFocus by remember { mutableIntStateOf(0) }
+    LaunchedEffect(launchRequest?.token) {
+        val request = launchRequest ?: return@LaunchedEffect
+        request.date?.takeIf { it.year == year }?.let { day ->
+            focusDate = day
+            focusToken++
+            selectedMonth = day.monthValue
+        }
+        if (request.quickAdd) quickAddFocus++
+        onLaunchHandled()
+    }
+
     val saveDraft: (EventDraft) -> Unit = { d ->
-        calendar.addEvent(d.date, d.storedTime { it.toStoredTime() }, d.title)
+        calendar.addEvent(d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
     }
 
     val bgTint by animateColorAsState(
@@ -304,7 +351,23 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             Spacer(Modifier.height(10.dp))
 
             // Passed as a lambda so only the header recomposes while the count animates.
-            YearHeader(paint = paint, shownCount = { shownCount })
+            YearHeader(
+                paint = paint,
+                shownCount = { shownCount },
+                next = nextEvent,
+                nameOf = nameOf,
+                colorOf = memberColor,
+                // Open the event's day (today, for a trip under way) in the month view.
+                onNextClick = { event ->
+                    val day = maxOf(event.date, today)
+                    if (day.year == year) {
+                        haptics.tap()
+                        focusDate = day
+                        focusToken++
+                        selectedMonth = day.monthValue
+                    }
+                }
+            )
             Spacer(Modifier.height(14.dp))
 
             // Year ↔ month: the tapped card expands in place via shared bounds.
@@ -352,11 +415,12 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                             colorOf = memberColor,
                             nameOf = nameOf,
                             editorNameOf = { e -> e.editedByUid?.let { calendar.displayName(it, e.editedByName.orEmpty()) } },
+                            isMine = { e -> calendar.isMe(e.authorUid) },
                             initialSelectedDate = focusDate,
                             focusToken = focusToken,
                             onAddEvent = saveDraft,
                             onUpdateEvent = { event, d ->
-                                calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title)
+                                calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
@@ -373,6 +437,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             parser = parser,
             today = today,
             onSubmit = { quickDraft = it },
+            focusRequest = quickAddFocus,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
@@ -441,3 +506,12 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     }
 }
 
+
+/**
+ * A request to open the calendar somewhere specific, from a home-screen widget tap.
+ *
+ * @property date  the day to show in the month view (this year only), or null.
+ * @property quickAdd true to focus the quick-add bar.
+ * @property token unique per tap, so tapping the same day twice still works.
+ */
+data class LaunchRequest(val date: LocalDate?, val quickAdd: Boolean, val token: Long)

@@ -47,6 +47,11 @@ import io.github.sunken1110.tandemplanner.ai.TimeRecall
 import io.github.sunken1110.tandemplanner.ai.TimeSuggestion
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
+import io.github.sunken1110.tandemplanner.currentDate
+import io.github.sunken1110.tandemplanner.data.MAX_EVENT_DAYS
+import io.github.sunken1110.tandemplanner.model.KoreanHolidays
+import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
+import androidx.compose.ui.graphics.Color
 import io.github.sunken1110.tandemplanner.ui.common.koreanLabel
 import io.github.sunken1110.tandemplanner.ui.common.koreanShort
 import io.github.sunken1110.tandemplanner.ui.common.weekendColor
@@ -55,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import kotlin.time.Duration.Companion.milliseconds
 
 /** Wait this long after typing stops before looking up past events, so the hint doesn't flicker. */
@@ -63,8 +69,17 @@ private const val RECALL_DEBOUNCE_MS = 300
 /** Default time when the user first turns a time on: the next full hour. */
 private fun nextFullHour(): LocalTime = LocalTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
 
-/** "10월 30일 (금)" */
-private fun LocalDate.koreanLabel(): String = "${monthValue}월 ${dayOfMonth}일 (${dayOfWeek.koreanShort()})"
+/**
+ * "10월 30일 (금)", or "9월 25일 (금) 추석" on a public holiday. The year is added
+ * when it isn't this year ("2027년 1월 5일 (화)"), so it is clear before saving.
+ */
+private fun LocalDate.koreanLabel(): String =
+    (if (year != currentDate().year) "${year}년 " else "") +
+        "${monthValue}월 ${dayOfMonth}일 (${dayOfWeek.koreanShort()})" + (KoreanHolidays.of(this)?.let { " ${it.short}" } ?: "")
+
+/** Red for public holidays and Sundays, sky blue for Saturdays, null otherwise. */
+private fun LocalDate.labelColor(): Color? =
+    if (KoreanHolidays.of(this) != null) SundayRed else dayOfWeek.weekendColor()
 
 /**
  * Bottom sheet for creating an event.
@@ -74,6 +89,11 @@ private fun LocalDate.koreanLabel(): String = "${monthValue}월 ${dayOfMonth}일
  * corrected in the same place before saving.
  *
  * Also used to edit an existing event (pre-filled draft, [saveLabel] "수정").
+ *
+ * "하루" / "여러 날" switches between a one-day event and a multi-day one (a trip,
+ * a vacation). A multi-day event is all-day on each of its days, so the time
+ * controls are hidden while it is selected; the time chosen before is kept and
+ * comes back when switching back to "하루".
  *
  * @param history past events used to suggest a time for similar titles (see [TimeRecall]).
  * @param saveLabel text on the confirm button.
@@ -92,6 +112,17 @@ fun EventEditorSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var date by remember { mutableStateOf(initial.date) }
+    // Last day of a multi-day event; null = one day.
+    var endDate by remember { mutableStateOf(initial.endDate?.takeIf { it.isAfter(initial.date) }) }
+    // Remembered length, so switching "여러 날" off and on again keeps it.
+    var lastSpanDays by remember { mutableStateOf(endDate?.let { ChronoUnit.DAYS.between(initial.date, it) } ?: 1L) }
+    LaunchedEffect(endDate, date) { endDate?.let { lastSpanDays = ChronoUnit.DAYS.between(date, it) } }
+    val multiDay = endDate != null
+    /** Moves the start day, keeping the event's length. */
+    fun shiftStart(days: Long) {
+        date = date.plusDays(days)
+        endDate = endDate?.plusDays(days)
+    }
     var time by remember { mutableStateOf(initial.time) }
     // A legacy free-form time ("저녁쯤"), kept until the user picks a time themselves.
     var rawTime by remember { mutableStateOf(initial.rawTime) }
@@ -127,16 +158,61 @@ fun EventEditorSheet(
         ) {
             // ── Date (stepper, so parsed dates can be nudged) ──
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { haptics.tap(); date = date.minusDays(1) }) { Text("‹", fontSize = 20.sp) }
+                TextButton(onClick = { haptics.tap(); shiftStart(-1) }) { Text("‹", fontSize = 20.sp) }
                 Text(
-                    date.koreanLabel(),
+                    if (multiDay) "${date.koreanLabel()} 부터" else date.koreanLabel(),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Medium,
-                    color = date.dayOfWeek.weekendColor() ?: MaterialTheme.colorScheme.onSurface,
+                    color = date.labelColor() ?: MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                TextButton(onClick = { haptics.tap(); date = date.plusDays(1) }) { Text("›", fontSize = 20.sp) }
+                TextButton(onClick = { haptics.tap(); shiftStart(1) }) { Text("›", fontSize = 20.sp) }
+            }
+
+            // ── Last day (multi-day events only) ──
+            AnimatedVisibility(
+                visible = multiDay,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                val end = endDate ?: date.plusDays(lastSpanDays)
+                val days = ChronoUnit.DAYS.between(date, end) + 1
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = { haptics.tap(); endDate = end.minusDays(1) },
+                        enabled = days > 2
+                    ) { Text("‹", fontSize = 20.sp) }
+                    Text(
+                        "${end.koreanLabel()} 까지 · ${days}일",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = end.labelColor() ?: MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    TextButton(
+                        onClick = { haptics.tap(); endDate = end.plusDays(1) },
+                        enabled = days < MAX_EVENT_DAYS
+                    ) { Text("›", fontSize = 20.sp) }
+                }
+            }
+
+            // ── One day / several days ──
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    selected = !multiDay,
+                    onClick = { haptics.tap(); endDate = null },
+                    label = { Text("하루") }
+                )
+                FilterChip(
+                    selected = multiDay,
+                    onClick = {
+                        haptics.tap()
+                        if (!multiDay) endDate = date.plusDays(lastSpanDays.coerceIn(1L, MAX_EVENT_DAYS - 1L))
+                    },
+                    label = { Text("여러 날") }
+                )
             }
             Spacer(Modifier.height(8.dp))
 
@@ -154,7 +230,13 @@ fun EventEditorSheet(
             )
             Spacer(Modifier.height(12.dp))
 
-            // ── Time ──
+            // ── Time (one-day events only; multi-day events are all-day) ──
+            AnimatedVisibility(
+                visible = !multiDay,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+            Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("시간", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
@@ -210,6 +292,19 @@ fun EventEditorSheet(
                         .padding(top = 12.dp)
                 )
             }
+            }
+            }
+            AnimatedVisibility(
+                visible = multiDay,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Text(
+                    "여러 날 일정은 매일 하루 종일로 표시돼요",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(Modifier.height(20.dp))
             Button(
@@ -222,7 +317,11 @@ fun EventEditorSheet(
                     }
                     haptics.confirm()
                     saving = true
-                    val draft = EventDraft(date, time, title.trim(), rawTime = if (time == null) rawTime else null)
+                    val draft = if (multiDay) {
+                        EventDraft(date, null, title.trim(), endDate = endDate)
+                    } else {
+                        EventDraft(date, time, title.trim(), rawTime = if (time == null) rawTime else null)
+                    }
                     // Let the sheet slide away before handing the result back.
                     scope.launch { sheetState.hide() }.invokeOnCompletion { onSave(draft) }
                 },

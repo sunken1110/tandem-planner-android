@@ -173,11 +173,13 @@ service cloud.firestore {
       match /events/{eventId} {
 
         // Field types and sizes. `time` is "HH:mm", blank, or a short free-form
-        // value written by early app versions.
+        // value written by early app versions. `endDate` (multi-day events only) is
+        // a later day than `date` ("YYYY-MM-DD" strings compare in date order), and
+        // such events are all-day, so their time is blank.
         function validEvent(d) {
           return d.keys().hasOnly([
               'date', 'time', 'title', 'authorUid', 'authorName', 'createdAt',
-              'updatedAt', 'editedByUid', 'editedByName', 'original'
+              'updatedAt', 'editedByUid', 'editedByName', 'original', 'endDate'
             ])
             && d.date is string && d.date.size() == 10
             && d.time is string && d.time.size() <= 20
@@ -186,12 +188,17 @@ service cloud.firestore {
             && d.authorName is string && d.authorName.size() <= 40
             && (!('editedByUid' in d) || d.editedByUid is string)
             && (!('editedByName' in d) || (d.editedByName is string && d.editedByName.size() <= 40))
-            && (!('original' in d) || d.original is map);
+            && (!('original' in d) || d.original is map)
+            && (!('endDate' in d)
+              || (d.endDate is string && d.endDate.size() == 10 && d.endDate > d.date && d.time == ''));
         }
 
-        // The editable part of an event, in the same shape as `original`.
+        // The editable part of an event, in the same shape as `original`
+        // (with `endDate` only for a multi-day event).
         function editable(d) {
-          return { 'date': d.date, 'time': d.time, 'title': d.title };
+          return ('endDate' in d)
+            ? { 'date': d.date, 'time': d.time, 'title': d.title, 'endDate': d.endDate }
+            : { 'date': d.date, 'time': d.time, 'title': d.title };
         }
 
         function hasMarks(d) {

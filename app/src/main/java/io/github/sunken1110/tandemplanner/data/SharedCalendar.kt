@@ -372,16 +372,7 @@ class SharedCalendar(context: Context) {
         val roomListener = room(code).addSnapshotListener { snap, err ->
             if (err != null) return@addSnapshotListener reportError("달력 정보를 불러오지 못했어요.", err)
             if (snap == null || !snap.exists()) return@addSnapshotListener
-            // Read defensively: a value of an unexpected type is skipped, never a crash.
-            members = (snap.get("members") as? List<*>).orEmpty().filterIsInstance<String>()
-            names = (snap.get("names") as? Map<*, *>).orEmpty().entries
-                .mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
-                .toMap()
-            formerUids = (snap.get("formerUids") as? Map<*, *>).orEmpty().entries
-                .mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
-                .toMap()
-            recoveryOwners = (snap.get("recovery") as? Map<*, *>).orEmpty().keys
-                .filterIsInstance<String>().toSet()
+            applyRoom(snap)
         }
 
         val eventsListener = room(code).collection("events")
@@ -394,36 +385,86 @@ class SharedCalendar(context: Context) {
                 // events; skip rebuilding the list, which would regroup and re-sort
                 // everything and recompose every day cell.
                 if (snap.documentChanges.isEmpty() && events.isNotEmpty()) return@addSnapshotListener
-                // Missing fields fall back to defaults and unknown fields are ignored,
-                // so mixed app versions can share the same data. Fields are read with
-                // `str()` rather than getString(), which throws on a non-string value:
-                // one malformed document must not crash the app on every launch.
-                val list = snap.documents.mapNotNull { d ->
-                    val date = d.str("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                        ?: return@mapNotNull null
-                    Event(
-                        id = d.id,
-                        date = date,
-                        time = d.str("time").orEmpty(),
-                        title = d.str("title").orEmpty(),
-                        authorUid = d.str("authorUid").orEmpty(),
-                        authorName = d.str("authorName").orEmpty(),
-                        editedByUid = d.str("editedByUid"),
-                        editedByName = d.str("editedByName"),
-                        original = (d.get("original") as? Map<*, *>)?.let { m ->
-                            val originalDate = (m["date"] as? String)
-                                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                            originalDate?.let {
-                                EventSnapshot(it, m["time"] as? String ?: "", m["title"] as? String ?: "")
-                            }
-                        }
-                    )
-                }
+                val list = snap.documents.mapNotNull(::parseEvent)
                 events.clear()
                 events.addAll(list)
             }
 
         return listOf(roomListener, eventsListener)
+    }
+
+    /**
+     * Reads the room and its events once, without listening. Used in the background
+     * (the home-screen widget's hourly refresh), where no screen keeps listeners open.
+     * Returns false when there is no room, no sign-in, or the server can't be reached.
+     */
+    suspend fun refreshOnce(): Boolean {
+        val code = roomCode ?: return false
+        if (auth.currentUser == null) return false
+        return try {
+            val roomSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { room(code).get().awaitResult() }
+                ?: return false
+            if (!roomSnap.exists()) return false
+            applyRoom(roomSnap)
+            val eventsSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
+                room(code).collection("events").get().awaitResult()
+            } ?: return false
+            val list = eventsSnap.documents.mapNotNull(::parseEvent)
+            events.clear()
+            events.addAll(list)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Takes the members, names and recovery info from a room snapshot. */
+    private fun applyRoom(snap: DocumentSnapshot) {
+        // Read defensively: a value of an unexpected type is skipped, never a crash.
+        members = (snap.get("members") as? List<*>).orEmpty().filterIsInstance<String>()
+        names = (snap.get("names") as? Map<*, *>).orEmpty().entries
+            .mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
+            .toMap()
+        formerUids = (snap.get("formerUids") as? Map<*, *>).orEmpty().entries
+            .mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
+            .toMap()
+        recoveryOwners = (snap.get("recovery") as? Map<*, *>).orEmpty().keys
+            .filterIsInstance<String>().toSet()
+    }
+
+    /**
+     * One event document → [Event], or null if it has no valid date.
+     *
+     * Missing fields fall back to defaults and unknown fields are ignored, so mixed
+     * app versions can share the same data. Fields are read with `str()` rather than
+     * getString(), which throws on a non-string value: one malformed document must
+     * not crash the app on every launch.
+     */
+    private fun parseEvent(d: DocumentSnapshot): Event? {
+        val date = d.str("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+        return Event(
+            id = d.id,
+            date = date,
+            time = d.str("time").orEmpty(),
+            title = d.str("title").orEmpty(),
+            authorUid = d.str("authorUid").orEmpty(),
+            authorName = d.str("authorName").orEmpty(),
+            editedByUid = d.str("editedByUid"),
+            editedByName = d.str("editedByName"),
+            original = (d.get("original") as? Map<*, *>)?.let { m ->
+                val originalDate = (m["date"] as? String)
+                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                originalDate?.let {
+                    EventSnapshot(
+                        it,
+                        m["time"] as? String ?: "",
+                        m["title"] as? String ?: "",
+                        (m["endDate"] as? String)?.parseEndDate(after = it)
+                    )
+                }
+            },
+            endDate = d.str("endDate")?.parseEndDate(after = date)
+        )
     }
 
     // ─────────────────────────────────────────────
@@ -432,20 +473,26 @@ class SharedCalendar(context: Context) {
     // Writes are fire-and-forget: Firestore applies them locally right away
     // (even offline) and uploads them when possible.
 
-    fun addEvent(date: LocalDate, time: String, title: String) {
+    /**
+     * Adds an event. With [endDate] (after [date]) it is a multi-day event, which is
+     * always all-day, so [time] is ignored then.
+     */
+    fun addEvent(date: LocalDate, time: String, title: String, endDate: LocalDate? = null) {
         val code = roomCode ?: return
         val me = uid ?: return
+        val end = endDate?.takeIf { it.isAfter(date) }
+        val data = mutableMapOf<String, Any>(
+            "date" to date.toString(),
+            "time" to if (end != null) "" else time,
+            "title" to title,
+            "authorUid" to me,
+            "authorName" to myName,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        // Only multi-day events have the field, so one-day events look exactly as before.
+        if (end != null) data["endDate"] = end.toString()
         room(code).collection("events").document()
-            .set(
-                mapOf(
-                    "date" to date.toString(),
-                    "time" to time,
-                    "title" to title,
-                    "authorUid" to me,
-                    "authorName" to myName,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-            )
+            .set(data)
             .addOnFailureListener { reportError("일정을 저장하지 못했어요.", it) }
     }
 
@@ -461,14 +508,18 @@ class SharedCalendar(context: Context) {
      * - The author edits → their new version is the one that counts, so the marks
      *   are removed too.
      */
-    fun updateEvent(event: Event, date: LocalDate, time: String, title: String) {
+    fun updateEvent(event: Event, date: LocalDate, time: String, title: String, endDate: LocalDate? = null) {
         val code = roomCode ?: return
         val me = uid ?: return
-        val next = EventSnapshot(date, time, title)
+        val end = endDate?.takeIf { it.isAfter(date) }
+        val storedTime = if (end != null) "" else time
+        val next = EventSnapshot(date, storedTime, title, end)
         val updates = mutableMapOf<String, Any>(
             "date" to date.toString(),
-            "time" to time,
+            "time" to storedTime,
             "title" to title,
+            // Becoming a one-day event removes the field instead of storing a null.
+            "endDate" to (end?.toString() ?: FieldValue.delete()),
             "updatedAt" to FieldValue.serverTimestamp()
         )
         val original = event.original ?: event.snapshot()
@@ -478,11 +529,13 @@ class SharedCalendar(context: Context) {
             updates["editedByUid"] = FieldValue.delete()
             updates["editedByName"] = FieldValue.delete()
         } else {
-            updates["original"] = mapOf(
-                "date" to original.date.toString(),
-                "time" to original.time,
-                "title" to original.title
-            )
+            updates["original"] = buildMap {
+                put("date", original.date.toString())
+                put("time", original.time)
+                put("title", original.title)
+                // Same shape as the event itself: `endDate` only for a multi-day original.
+                original.endDate?.let { put("endDate", it.toString()) }
+            }
             updates["editedByUid"] = me
             updates["editedByName"] = myName
         }
@@ -545,6 +598,10 @@ class SharedCalendar(context: Context) {
 
     /** 0 for the room creator, 1 for the second member, -1 if unknown. */
     fun memberIndex(memberUid: String): Int = members.indexOf(currentUid(memberUid))
+
+    /** A stored `endDate`, accepted only when it is a valid day after [after]. */
+    private fun String.parseEndDate(after: LocalDate): LocalDate? =
+        runCatching { LocalDate.parse(this) }.getOrNull()?.takeIf { it.isAfter(after) }
 
     private fun randomCode(): String =
         (1..CODE_LENGTH).map { CODE_CHARS.random() }.joinToString("")

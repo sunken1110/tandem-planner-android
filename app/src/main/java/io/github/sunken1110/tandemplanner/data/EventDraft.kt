@@ -13,12 +13,14 @@ import java.time.LocalTime
  * @property rawTime a stored time that isn't a clock time, such as "저녁쯤" typed
  *           in an early app version. It is kept as is unless the user changes the
  *           time, so editing only the title never erases it. Null for new events.
+ * @property endDate last day of a multi-day (all-day) event, or null for one day.
  */
 data class EventDraft(
     val date: LocalDate,
     val time: LocalTime?,
     val title: String,
-    val rawTime: String? = null
+    val rawTime: String? = null,
+    val endDate: LocalDate? = null
 ) {
     /** The value to store in Firestore: "HH:mm", the untouched [rawTime], or blank. */
     fun storedTime(toStored: (LocalTime) -> String): String = time?.let(toStored) ?: rawTime.orEmpty()

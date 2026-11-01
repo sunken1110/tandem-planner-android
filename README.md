@@ -66,16 +66,21 @@
 ## Roadmap
 
 - [x] Edit existing events (with `updatedAt`, and an "edited by · original" note for the other member's edits)
-- [ ] D-day countdowns pinned to the year view
+- [x] Multi-day all-day events (vacations, trips) drawn as continuous bands across the month grid
+- [x] Confirmation before deleting an event
+- [x] Korean public holidays (incl. substitute holidays and election days), bundled per year
+- [x] D-day card for the next event (or a trip under way) at the top of the year view; the badge deepens as the day approaches (D-8+, D-7…2, D-1, D-DAY)
+- [ ] Pinned D-days (choose which events to count down to)
 - [ ] Shared checklists
 - [ ] "Update required" gate driven by a minimum version in Firestore
 - [x] Seat recovery after a reinstall (personal recovery codes; only a SHA-256 hash is stored)
 - [ ] **AI-assisted planning**
   - [x] Natural-language quick add (rule-based `EventParser`)
+  - [x] Periods in quick add ("3일부터 5일까지", "내일부터 2박 3일", "11월 3~6일")
   - [ ] LLM-backed `EventParser` (pasted chat messages, multiple events per sentence, fuzzy phrasing)
   - [ ] Weekly / monthly summaries of shared plans
   - [ ] On-device models where possible, for privacy
-- [ ] Home-screen widget (Jetpack Glance)
+- [x] Home-screen widget (Jetpack Glance): D-day card that grows into an upcoming list, hourly background refresh
 - [ ] Localization (UI strings currently in Korean)
 
 ---
@@ -151,6 +156,7 @@ rooms/{code}/events/{eventId}
   authorName: "name"             # snapshot, fallback for display
   createdAt:  timestamp
   updatedAt, editedByUid, editedByName, original   # edit history (optional)
+  endDate:    "2026-10-20"       # multi-day events only: last day (all-day, time is blank)
 
 rooms/{code}/claims/{uid}        # short-lived proof during a seat recovery
   seat:   0 | 1
