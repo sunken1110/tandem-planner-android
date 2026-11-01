@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,11 @@ import kotlinx.coroutines.launch
 /**
  * First-run screen: enter a display name, then either create a new shared
  * calendar or join one with a 6-character code from the partner.
+ *
+ * At the bottom, "이전 자리 되찾기" opens a third path for someone who reinstalled
+ * the app: room code + their recovery code bring back their seat (name, color
+ * and the right to edit their own events). No name is needed there; the old one
+ * is restored.
  */
 @Composable
 fun SetupScreen(calendar: SharedCalendar) {
@@ -66,6 +72,11 @@ fun SetupScreen(calendar: SharedCalendar) {
     var nameError by remember { mutableStateOf(false) }
     var codeError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+
+    var showRecover by rememberSaveable { mutableStateOf(false) }
+    var recoverRoom by rememberSaveable { mutableStateOf("") }
+    var recoverCode by rememberSaveable { mutableStateOf("") }
+    var recoverError by remember { mutableStateOf<String?>(null) }
 
     fun validName(): Boolean {
         nameError = name.isBlank()
@@ -196,6 +207,75 @@ fun SetupScreen(calendar: SharedCalendar) {
                     .height(52.dp),
                 shape = RoundedCornerShape(14.dp)
             ) { Text("참여하기", fontSize = 16.sp) }
+
+            // ── Recover a seat (after reinstalling) ──
+            Spacer(Modifier.height(12.dp))
+            TextButton(
+                onClick = { showRecover = !showRecover; recoverError = null },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) { Text(if (showRecover) "닫기" else "앱을 다시 설치했나요? 이전 자리 되찾기", fontSize = 13.sp) }
+            AnimatedVisibility(visible = showRecover) {
+                Column {
+                    Text(
+                        "쓰던 달력의 공유 코드와, 그때 받아 둔 복구 코드를 입력하면 이름과 색, 내 일정이 그대로 돌아와요.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = recoverRoom,
+                        onValueChange = {
+                            recoverRoom = it.uppercase().filter { ch -> ch.isLetterOrDigit() }
+                                .take(SharedCalendar.CODE_LENGTH)
+                            recoverError = null
+                        },
+                        label = { Text("공유 코드 ${SharedCalendar.CODE_LENGTH}자리") },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(letterSpacing = 4.sp, fontWeight = FontWeight.Medium),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = recoverCode,
+                        // Hyphens and spaces are allowed while typing; they are ignored later.
+                        onValueChange = {
+                            recoverCode = it.uppercase().filter { ch -> ch.isLetterOrDigit() || ch == '-' }.take(20)
+                            recoverError = null
+                        },
+                        label = { Text("복구 코드") },
+                        placeholder = { Text("1-ABCD-EFGH-JKMN") },
+                        singleLine = true,
+                        isError = recoverError != null,
+                        supportingText = {
+                            val msg = recoverError
+                            if (msg != null) Text(msg) else Text("공동 달력 화면의 '공유'에서 받아 둔 코드")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            if (busy) return@OutlinedButton
+                            haptics.tap()
+                            busy = true
+                            scope.launch {
+                                val ok = calendar.recoverSeat(recoverRoom, recoverCode)
+                                busy = false
+                                if (ok) {
+                                    haptics.confirm()
+                                } else {
+                                    recoverError = calendar.lastError
+                                    calendar.lastError = null
+                                    haptics.reject()
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("자리 되찾기", fontSize = 16.sp) }
+                }
+            }
 
             Spacer(Modifier.height(20.dp))
             AnimatedVisibility(visible = busy) {

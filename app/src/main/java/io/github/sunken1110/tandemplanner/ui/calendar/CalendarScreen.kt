@@ -39,12 +39,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,6 +94,15 @@ private val QUICK_ADD_CLEARANCE = 64.dp
 private const val ERROR_VISIBLE_MS = 6_000
 
 /**
+ * Opacity of the hidden month-view warm-up: far too faint to see, but above 0 so
+ * the renderer really draws it (and so prepares its GPU shaders).
+ */
+private const val WARM_UP_ALPHA = 0.004f
+
+/** How long the warm-up stays: the ring's intro plus its glow and moving light. */
+private const val WARM_UP_MS = 1200
+
+/**
  * Main screen once the user has joined a shared calendar.
  *
  * Owns screen-level state (today, fill animation, selected month, dialogs)
@@ -105,11 +116,14 @@ private const val ERROR_VISIBLE_MS = 6_000
 fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     // "Today", refreshed automatically at midnight (unless a debug date is set).
     var today by remember { mutableStateOf(currentDate()) }
+    // The midnight timer below pauses while the phone is in deep sleep, so also
+    // re-check whenever the app comes back to the foreground.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { today = currentDate() }
     if (DEBUG_TODAY == null) {
         LaunchedEffect(today) {
             val untilMidnight = ChronoUnit.MILLIS.between(LocalDateTime.now(), today.plusDays(1).atStartOfDay())
             delay(untilMidnight.coerceAtLeast(1_000L).milliseconds)
-            today = LocalDate.now()
+            today = currentDate()
         }
     }
 
@@ -152,8 +166,13 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     val nameOf: (Event) -> String = { calendar.displayName(it.authorUid, it.authorName) }
 
     // Open the share dialog once right after creating a calendar.
-    var showShare by remember { mutableStateOf(calendar.justCreated) }
-    LaunchedEffect(Unit) { calendar.justCreated = false }
+    // Opened once right after creating a room (to share the code) or recovering a
+    // seat (to show the new recovery code, since the used one no longer works).
+    var showShare by remember { mutableStateOf(calendar.justCreated || calendar.justRecovered) }
+    LaunchedEffect(Unit) {
+        calendar.justCreated = false
+        calendar.justRecovered = false
+    }
 
     // null = year overview, 1..12 = expanded month.
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -185,10 +204,12 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
     val parser: EventParser = remember { RuleBasedEventParser }
     var quickDraft by remember { mutableStateOf<EventDraft?>(null) }
     var focusDate by remember { mutableStateOf<LocalDate?>(null) }
+    // Bumped on every quick-add save, so saving to the same date twice still re-selects it.
+    var focusToken by remember { mutableIntStateOf(0) }
     // Forget a quick-add focus date once the user returns to the year view.
     LaunchedEffect(selectedMonth) { if (selectedMonth == null) focusDate = null }
     val saveDraft: (EventDraft) -> Unit = { d ->
-        calendar.addEvent(d.date, d.time?.toStoredTime().orEmpty(), d.title)
+        calendar.addEvent(d.date, d.storedTime { it.toStoredTime() }, d.title)
     }
 
     val bgTint by animateColorAsState(
@@ -213,10 +234,15 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             SeasonParticles(season = s, dark = dark)
         }
 
-        // ── JIT warm-up ──
-        // The month view's code is compiled on first use, which caused a one-time
-        // stutter. After the fill animation, render it invisibly for a few frames
-        // so the first real tap is smooth.
+        // ── Warm-up ──
+        // The first time the month view is shown, its code is compiled and the GPU
+        // builds its shaders (blurred glow, gradients, text), which made the first
+        // open stutter. After the year fill (a natural "loading screen"), the month
+        // view is drawn behind everything for about a second, so all of that is done
+        // before the first real tap.
+        // It must actually be drawn: a layer with alpha 0 is skipped by the renderer
+        // (only the code would warm up, not the GPU), so it uses a tiny alpha instead.
+        // It runs long enough for the ring's intro, glow and moving light to render.
         val fillDone by remember(passedDays) {
             derivedStateOf { fill.value >= passedDays + FADE_DAYS - 0.5f }
         }
@@ -225,7 +251,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = 0f }
+                    .graphicsLayer { alpha = WARM_UP_ALPHA }
             ) {
                 MonthDetail(
                     yearMonth = YearMonth.from(today),
@@ -240,11 +266,12 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                     onDeleteEvent = {},
                     onBack = {},
                     onPrev = {},
-                    onNext = {}
+                    onNext = {},
+                    warmUp = true
                 )
             }
             LaunchedEffect(Unit) {
-                repeat(3) { withFrameNanos { } }
+                delay(WARM_UP_MS.milliseconds)
                 prewarmed = true
             }
         }
@@ -276,7 +303,8 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
             )
             Spacer(Modifier.height(10.dp))
 
-            YearHeader(paint = paint, shownCount = shownCount)
+            // Passed as a lambda so only the header recomposes while the count animates.
+            YearHeader(paint = paint, shownCount = { shownCount })
             Spacer(Modifier.height(14.dp))
 
             // Year ↔ month: the tapped card expands in place via shared bounds.
@@ -325,9 +353,10 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                             nameOf = nameOf,
                             editorNameOf = { e -> e.editedByUid?.let { calendar.displayName(it, e.editedByName.orEmpty()) } },
                             initialSelectedDate = focusDate,
+                            focusToken = focusToken,
                             onAddEvent = saveDraft,
                             onUpdateEvent = { event, d ->
-                                calendar.updateEvent(event, d.date, d.time?.toStoredTime().orEmpty(), d.title)
+                                calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title)
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
@@ -403,6 +432,7 @@ fun CalendarScreen(calendar: SharedCalendar, startFill: Boolean = true) {
                 // Jump to the event's month so the new dot is visible.
                 if (saved.date.year == year) {
                     focusDate = saved.date
+                    focusToken++
                     selectedMonth = saved.date.monthValue
                 }
             }

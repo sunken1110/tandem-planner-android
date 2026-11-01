@@ -65,11 +65,11 @@
 
 ## Roadmap
 
-- [ ] Edit existing events (with `updatedAt` / `updatedBy`)
+- [x] Edit existing events (with `updatedAt`, and an "edited by · original" note for the other member's edits)
 - [ ] D-day countdowns pinned to the year view
 - [ ] Shared checklists
 - [ ] "Update required" gate driven by a minimum version in Firestore
-- [ ] Google Sign-In, so membership survives reinstalls
+- [x] Seat recovery after a reinstall (personal recovery codes; only a SHA-256 hash is stored)
 - [ ] **AI-assisted planning**
   - [x] Natural-language quick add (rule-based `EventParser`)
   - [ ] LLM-backed `EventParser` (pasted chat messages, multiple events per sentence, fuzzy phrasing)
@@ -140,6 +140,8 @@ rooms/{code}
   members:   [uid, uid]          # max 2, enforced by security rules
   names:     { uid: "name" }
   createdAt: timestamp
+  recovery:  { uid: bytes }      # SHA-256 of each member's recovery secret
+  formerUids: { oldUid: newUid } # seat recoveries: old account → its successor
 
 rooms/{code}/events/{eventId}
   date:       "2026-10-17"       # ISO-8601 string
@@ -148,11 +150,18 @@ rooms/{code}/events/{eventId}
   authorUid:  uid
   authorName: "name"             # snapshot, fallback for display
   createdAt:  timestamp
+  updatedAt, editedByUid, editedByName, original   # edit history (optional)
+
+rooms/{code}/claims/{uid}        # short-lived proof during a seat recovery
+  seat:   0 | 1
+  secret: "ABCDEFGHJKMN"
 ```
+
+**Seat recovery:** sign-in is anonymous, so reinstalling the app creates a new account. Each member gets a recovery code like `1-ABCD-EFGH-JKMN` (seat number + 12-character secret), shown in the share dialog. Entering the room code and that recovery code on a fresh install writes a claim the rules only accept if its hash matches; the new account then takes over the seat in place (same color and name), the code is replaced by a new one, and `formerUids` keeps the old account's events attributed to the same person.
 
 **Compatibility rule:** both members update the app manually, so different versions read the same data. Fields are only ever **added**, never renamed or retyped. Readers treat missing fields as defaults and ignore unknown ones.
 
-Security rules live in [`firestore.rules`](firestore.rules).
+Security rules live in [`firestore.rules`](firestore.rules). They cap a room at two members, keep the creator first, let each member set only their own name, allow a seat to change hands only with its recovery code, keep every event's author fixed, protect the edit-history fields from forgery, and type-check every field so a malformed write can't crash the other phone.
 
 ---
 

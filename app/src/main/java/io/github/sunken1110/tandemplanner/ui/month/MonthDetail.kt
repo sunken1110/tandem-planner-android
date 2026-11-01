@@ -42,8 +42,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -58,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.sunken1110.tandemplanner.DEBUG_GLOW_NO_BLUR
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
 import io.github.sunken1110.tandemplanner.model.Season
@@ -111,7 +116,7 @@ private const val RING_INTRO_MS = 550
 /** Start the color shift slightly after the month starts expanding. */
 private const val RING_INTRO_DELAY_MS = 150
 
-/** After the color shift, the ring's glow fades in over this long. */
+/** Dark mode: how long the neon glow takes to fade in around the lit center. */
 private const val RING_GLOW_FADE_MS = 400
 
 /** Ring glide duration when moving to another day. */
@@ -125,7 +130,10 @@ private const val RING_POP_SCALE = 1.055f
 
 /** Moving light: one lap of [SHINE_SWEEP_MS] every [SHINE_CYCLE_MS], starting at [SHINE_START_MS]. */
 private const val SHINE_CYCLE_MS = 5600
-private const val SHINE_START_MS = 100
+// Starts in the cycle's second half (2.9 s): the ring's intro (≤ 0.7 s) has
+// finished by then, so even the first lap is seen whole. Starting at 0.1 s made
+// the first lap begin before the ring was ready, so only its second half showed.
+private const val SHINE_START_MS = 2900
 private const val SHINE_SWEEP_MS = 1300
 
 /** Grows the ring slightly and settles it back. */
@@ -169,8 +177,13 @@ private fun deepTone(base: Color): Color = lerp(base, Color.Black, 0.45f)
  * @param sharedScope / animScope enable the expand-from-card transition.
  *        Both may be null when rendered invisibly for JIT warm-up.
  * @param initialSelectedDate day to select on open (e.g. an event just added via quick-add).
+ * @param focusToken changes on every new focus request, so the same date can be
+ *        re-selected (and scrolled to) again.
  * @param colorOf maps an author UID to that member's accent color.
  * @param nameOf  resolves an event's author display name.
+ * @param warmUp  true for the hidden pre-render after launch: the moving light is
+ *        shown mid-lap from the start, so its drawing code and GPU shaders get
+ *        prepared too (normally the first lap only starts after 2.9 s).
  * @param editorNameOf resolves the display name of the member who edited an event.
  */
 @OptIn(ExperimentalSharedTransitionApi::class, ExperimentalFoundationApi::class)
@@ -182,6 +195,7 @@ fun MonthDetail(
     sharedScope: SharedTransitionScope?,
     animScope: AnimatedVisibilityScope?,
     initialSelectedDate: LocalDate? = null,
+    focusToken: Int = 0,
     colorOf: (String) -> Color,
     nameOf: (Event) -> String,
     editorNameOf: (Event) -> String? = { it.editedByName },
@@ -190,7 +204,8 @@ fun MonthDetail(
     onDeleteEvent: (Event) -> Unit,
     onBack: () -> Unit,
     onPrev: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    warmUp: Boolean = false
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
@@ -199,7 +214,7 @@ fun MonthDetail(
     val passedInMonth = (1..daysInMonth).count { paint.isPast(yearMonth.atDay(it)) }
 
     // Initial selection: the requested date, else today in the current month, else the 1st.
-    var selectedDay by rememberSaveable(yearMonth.monthValue, initialSelectedDate) {
+    var selectedDay by rememberSaveable(yearMonth.monthValue, initialSelectedDate, focusToken) {
         val focus = initialSelectedDate?.takeIf { YearMonth.from(it) == yearMonth }
             ?: paint.today.takeIf { YearMonth.from(it) == yearMonth }
         mutableIntStateOf(focus?.dayOfMonth ?: 1)
@@ -212,7 +227,7 @@ fun MonthDetail(
     // ── Auto-scroll so the selected day's events are fully visible ──
     // Bumped on each day tap (and on open when a specific date was requested);
     // 0 means "don't scroll", so simply opening a month keeps the grid in view.
-    var revealRequest by remember(yearMonth.monthValue, initialSelectedDate) {
+    var revealRequest by remember(yearMonth.monthValue, initialSelectedDate, focusToken) {
         mutableIntStateOf(if (initialSelectedDate?.let { YearMonth.from(it) } == yearMonth) 1 else 0)
     }
     val revealRequester = remember { BringIntoViewRequester() }
@@ -221,7 +236,9 @@ fun MonthDetail(
     var sectionMinHeightPx by remember(yearMonth.monthValue) { mutableIntStateOf(0) }
     val revealMargin = with(density) { REVEAL_MARGIN.toPx() }
 
-    LaunchedEffect(revealRequest) {
+    // Keyed on the token too: a new focus request restarts the counter at 1,
+    // which may equal the previous value.
+    LaunchedEffect(revealRequest, focusToken) {
         if (revealRequest == 0) return@LaunchedEffect
         // Let the new day's list be composed and measured first (two frames is enough),
         // so we scroll exactly once, straight to the final position.
@@ -264,15 +281,34 @@ fun MonthDetail(
     LaunchedEffect(ringColorsTarget) {
         if (!ringIntroDone) {
             ringIntroDone = true
-            val spec = tween<Color>(RING_INTRO_MS, delayMillis = RING_INTRO_DELAY_MS)
-            launch { ringGlow.animateTo(ringColorsTarget.glow, spec) }
-            ringCore.animateTo(ringColorsTarget.core, spec)
-            ringGlowLevel.animateTo(1f, tween(RING_GLOW_FADE_MS))
+            if (ringStyle == RingStyle.NEON) {
+                // Neon is lit from the start: the white center is there as the month
+                // zooms in (the year view's outline is already light in dark mode),
+                // and only the colored glow fades in around it.
+                ringGlow.snapTo(ringColorsTarget.glow)
+                ringCore.snapTo(ringColorsTarget.core)
+                ringGlowLevel.animateTo(1f, tween(RING_GLOW_FADE_MS, delayMillis = RING_INTRO_DELAY_MS))
+            } else {
+                // Solid: the year view's dark outline color seeps into the season color,
+                // and the glow rises with it — same start, same duration, same curve —
+                // so the ring and its light come on together. The glow takes its final
+                // color right away (it starts fully transparent, so nothing dark shows);
+                // only its opacity animates, which keeps the blurred layers from
+                // re-rendering every frame.
+                ringGlow.snapTo(ringColorsTarget.glow)
+                val spec = tween<Float>(RING_INTRO_MS, delayMillis = RING_INTRO_DELAY_MS)
+                launch { ringGlowLevel.animateTo(1f, spec) }
+                ringCore.animateTo(ringColorsTarget.core, tween(RING_INTRO_MS, delayMillis = RING_INTRO_DELAY_MS))
+            }
             ringEffectsReady = true
         } else {
-            // Later changes (a day in the next season, or a theme switch) just cross-fade.
+            // Later changes (a theme switch while the month is open) just cross-fade.
+            // If that interrupted the intro, finish what it would have done, so the
+            // glow and the moving light don't stay off.
+            launch { ringGlowLevel.animateTo(1f, tween(300)) }
             launch { ringGlow.animateTo(ringColorsTarget.glow, tween(300)) }
             ringCore.animateTo(ringColorsTarget.core, tween(300))
+            ringEffectsReady = true
         }
     }
     val ringPainter = remember { SelectionRingPainter() }
@@ -303,8 +339,8 @@ fun MonthDetail(
 
     // Occasional light around the ring (one lap, then rest), with the glow
     // swelling during the lap. The 5.6 s cycle is twice the today-shimmer cycle
-    // (2.8 s), and the lap runs while the shimmer is resting, so the two effects
-    // never glow at the same time.
+    // (2.8 s; it glows at 1.5–2.8 s of each), and the lap runs at 2.9–4.2 s, while
+    // the shimmer is resting, so the two effects never glow at the same time.
     val shine = if (reduceMotion) null else rememberInfiniteTransition(label = "ringShine").animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -357,71 +393,178 @@ fun MonthDetail(
             modifier = Modifier.padding(start = 12.dp, bottom = 12.dp)
         )
 
-        // ── Day grid (with the selection ring drawn on top) ──
+        // ── Day grid, with the selection ring's glow and the ring on top ──
+        // Three layers, so an animating ring never re-draws the ~35 cells:
+        // 1. the cells, 2. the glow (one layer per glow step), 3. the ring.
         WeekdayHeaderRow(fontSize = 12.sp)
         Spacer(Modifier.height(6.dp))
-        Box(
-            Modifier
-                .onSizeChanged { gridWidthPx = it.width }
-                .drawWithContent {
-                    drawContent()
-                    if (ringPlaced && cellPx > 0f) {
-                        val out = RING_GAP.toPx() + RING_WIDTH.toPx() / 2
-                        val half = (cellPx / 2 + out) * ringScale.value
-                        val center = ringPos.value + Offset(cellPx / 2, cellPx / 2)
-                        val topLeft = center - Offset(half, half)
-                        val ringSize = Size(half * 2, half * 2)
-                        val corner = CornerRadius((CELL_CORNER.toPx() + out) * ringScale.value)
-                        ringPainter.draw(
-                            scope = this,
-                            topLeft = topLeft,
-                            size = ringSize,
-                            corner = corner,
-                            width = RING_WIDTH.toPx(),
-                            colors = RingColors(core = ringCore.value, glow = ringGlow.value),
-                            style = ringStyle,
-                            lap = if (ringEffectsReady) shine?.value else null,
-                            glowLevel = ringGlowLevel.value
+
+        // Ring geometry in the grid's coordinates; called from draw code only, so
+        // the animated values are read in the draw phase.
+        fun ringGeometry(density: Density): RingGeometry? = with(density) {
+            if (!ringPlaced || cellPx <= 0f) return null
+            val out = RING_GAP.toPx() + RING_WIDTH.toPx() / 2
+            val half = (cellPx / 2 + out) * ringScale.value
+            val center = ringPos.value + Offset(cellPx / 2, cellPx / 2)
+            RingGeometry(
+                topLeft = center - Offset(half, half),
+                size = Size(half * 2, half * 2),
+                corner = CornerRadius((CELL_CORNER.toPx() + out) * ringScale.value),
+                width = RING_WIDTH.toPx()
+            )
+        }
+        fun ringLap(): Float? = when {
+            warmUp -> 0.5f // mid-lap: draws the moving light and the breathing at once
+            ringEffectsReady -> shine?.value
+            else -> null
+        }
+
+        // Glow layer geometry (see below): the ring sits at a fixed spot inside each layer.
+        val glowBleedPx = with(density) { GLOW_BLEED.toPx() }
+        val ringOutPx = with(density) { RING_GAP.toPx() + RING_WIDTH.toPx() / 2 }
+        val ringSidePx = cellPx + ringOutPx * 2
+        val ringCornerPx = with(density) { CELL_CORNER.toPx() } + ringOutPx
+        val glowSideDp = with(density) { (ringSidePx + glowBleedPx * 2).toDp() }
+
+        // Moves a glow layer onto the ring and applies the landing pop (the layer's
+        // default transform origin, its center, is the ring's center). Hidden until
+        // the ring has been placed. Called from graphicsLayer blocks only, so the
+        // animated values never cause a redraw.
+        fun GraphicsLayerScope.followRing(): Boolean {
+            if (!ringPlaced || cellPx <= 0f) {
+                alpha = 0f
+                return false
+            }
+            translationX = ringPos.value.x - ringOutPx - glowBleedPx
+            translationY = ringPos.value.y - ringOutPx - glowBleedPx
+            scaleX = ringScale.value
+            scaleY = ringScale.value
+            return true
+        }
+
+        Box(Modifier.onSizeChanged { gridWidthPx = it.width }) {
+            Box(Modifier.graphicsLayer()) {
+                MonthGrid(yearMonth, gap = CELL_GAP) { date, column ->
+                    val isPast = paint.isPast(date)
+                    val isToday = date == paint.today
+                    DayCell(
+                        date = date,
+                        paint = paint,
+                        corner = CELL_CORNER,
+                        borderWidth = 2.dp,
+                        showTodayOutline = false, // the number badge marks today here
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(CELL_CORNER))
+                            .clickable {
+                                haptics.tap()
+                                selectedDay = date.dayOfMonth
+                                revealRequest++
+                            }
+                    ) {
+                        DayNumber(
+                            day = date.dayOfMonth,
+                            color = dayNumberColor(column = column, isPast = isPast),
+                            isPast = isPast,
+                            todayBadge = if (isToday) deepTone(paint.colorOf(date)) else null,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(start = 3.dp, top = 3.dp)
+                        )
+                        // Up to two titles in their authors' colors, plus "+N" for the rest.
+                        EventTitleChips(
+                            events = eventsByDate[date].orEmpty(),
+                            colorOf = colorOf,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(start = 3.dp, end = 3.dp, bottom = 3.dp)
                         )
                     }
                 }
-        ) {
-            MonthGrid(yearMonth, gap = CELL_GAP) { date, column ->
-                val isPast = paint.isPast(date)
-                val isToday = date == paint.today
-                DayCell(
-                    date = date,
-                    paint = paint,
-                    corner = CELL_CORNER,
-                    borderWidth = 2.dp,
-                    showTodayOutline = false, // the number badge marks today here
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(CELL_CORNER))
-                        .clickable {
-                            haptics.tap()
-                            selectedDay = date.dayOfMonth
-                            revealRequest++
-                        }
-                ) {
-                    DayNumber(
-                        day = date.dayOfMonth,
-                        color = dayNumberColor(column = column, isPast = isPast),
-                        isPast = isPast,
-                        todayBadge = if (isToday) deepTone(paint.colorOf(date)) else null,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(start = 3.dp, top = 3.dp)
-                    )
-                    // Up to two titles in their authors' colors, plus "+N" for the rest.
-                    EventTitleChips(
-                        events = eventsByDate[date].orEmpty(),
-                        colorOf = colorOf,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(start = 3.dp, end = 3.dp, bottom = 3.dp)
-                    )
-                }
             }
+
+            // Glow layers are only as big as the ring plus room for the blur, with the
+            // ring's stroke drawn at a fixed spot inside them. Gliding and the landing
+            // pop move and scale the whole layer (graphicsLayer translation/scale), so
+            // the blurred light is rendered once and reused instead of being re-blurred
+            // on every frame of a move. Only a season or theme change redraws it.
+            if (ringPainter.gpuGlow) {
+                // GPU glow (Android 12+): each layer is a sharp stroke blurred on the GPU.
+                ringPainter.gpuGlowLayers(ringStyle).forEach { layer ->
+                    key(layer) {
+                        val blur = remember(layer, density) {
+                            if (DEBUG_GLOW_NO_BLUR) null
+                            else layer.blurPx(density).let { BlurEffect(it, it, TileMode.Decal) }
+                        }
+                        Box(
+                            Modifier
+                                .size(glowSideDp)
+                                .graphicsLayer {
+                                    if (!followRing()) return@graphicsLayer
+                                    renderEffect = blur
+                                    alpha = layer.alphaAt(ringPulse(ringLap()), ringGlowLevel.value)
+                                }
+                                .drawBehind {
+                                    ringPainter.drawGlowSource(
+                                        scope = this,
+                                        topLeft = Offset(glowBleedPx, glowBleedPx),
+                                        size = Size(ringSidePx, ringSidePx),
+                                        corner = CornerRadius(ringCornerPx),
+                                        ringWidth = RING_WIDTH.toPx(),
+                                        glow = ringGlow.value,
+                                        layer = layer
+                                    )
+                                }
+                        )
+                    }
+                }
+            } else {
+                // Blur-mask glow (Android 11 and older): one layer with a fixed blur, so
+                // the blurred shape is rasterized once; breathing uses alpha and scale.
+                Box(
+                    Modifier
+                        .size(glowSideDp)
+                        .graphicsLayer {
+                            if (!followRing()) return@graphicsLayer
+                            val pulse = ringPulse(ringLap())
+                            alpha = ringPainter.outerGlowAlpha(ringStyle, pulse, ringGlowLevel.value)
+                            val scale = ringScale.value * ringPainter.outerGlowScale(pulse)
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .drawBehind {
+                            ringPainter.drawOuterGlow(
+                                scope = this,
+                                topLeft = Offset(glowBleedPx, glowBleedPx),
+                                size = Size(ringSidePx, ringSidePx),
+                                corner = CornerRadius(ringCornerPx),
+                                width = RING_WIDTH.toPx(),
+                                glow = ringGlow.value,
+                                style = ringStyle
+                            )
+                        }
+                )
+            }
+
+            // The ring itself.
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer()
+                    .drawBehind {
+                        val g = ringGeometry(this) ?: return@drawBehind
+                        ringPainter.draw(
+                            scope = this,
+                            topLeft = g.topLeft,
+                            size = g.size,
+                            corner = g.corner,
+                            width = g.width,
+                            colors = RingColors(core = ringCore.value, glow = ringGlow.value),
+                            style = ringStyle,
+                            lap = ringLap(),
+                            glowLevel = ringGlowLevel.value
+                        )
+                    }
+            )
         }
 
         // ── Selected day's events ──
@@ -510,7 +653,15 @@ fun MonthDetail(
     editingEvent?.let { event ->
         key(event.id) {
             EventEditorSheet(
-                initial = EventDraft(date = event.date, time = parseStoredTime(event.time), title = event.title),
+                initial = parseStoredTime(event.time).let { parsed ->
+                    EventDraft(
+                        date = event.date,
+                        time = parsed,
+                        title = event.title,
+                        // Keep a free-form legacy time ("저녁쯤") unless the user changes it.
+                        rawTime = event.time.takeIf { parsed == null && it.isNotBlank() }
+                    )
+                },
                 // Leave the event itself out, so it doesn't "suggest" its own old time.
                 history = remember(eventsByDate, event.id) {
                     eventsByDate.values.flatten().filter { it.id != event.id }
@@ -566,3 +717,14 @@ private fun DayNumber(
         )
     }
 }
+
+/** Where the selection ring is drawn, in the grid's coordinates. */
+private class RingGeometry(
+    val topLeft: Offset,
+    val size: Size,
+    val corner: CornerRadius,
+    val width: Float
+)
+
+/** Room around the ring inside each glow layer, so even the wide neon aura isn't clipped at the layer edge. */
+private val GLOW_BLEED = 40.dp

@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import io.github.sunken1110.tandemplanner.ui.common.BarSegments
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -107,12 +109,26 @@ private fun MonthCard(
         Spacer(Modifier.height(2.dp))
 
         MonthGrid(yearMonth, gap = 2.dp) { date, _ ->
-            DayCell(date = date, paint = paint, corner = 3.dp, borderWidth = 1.5.dp) {
-                val dayEvents = eventsByDate[date]
-                if (!dayEvents.isNullOrEmpty()) {
-                    Box(Modifier.matchParentSize().eventBar(dayEvents.barColors(colorOf)))
-                }
-            }
+            YearDayCell(
+                year = date.year,
+                dayOfYear = date.dayOfYear,
+                paint = paint,
+                bar = eventsByDate[date]?.let { BarSegments(it.barColors(colorOf)) }
+            )
         }
+    }
+}
+
+/**
+ * One tiny year-view day. Takes only stable, value-compared parameters (ints and
+ * an @Immutable bar), so when events change only the days whose bar changed
+ * recompose, instead of all ~365. (A LocalDate parameter would be a new object
+ * on every pass and defeat that.)
+ */
+@Composable
+private fun YearDayCell(year: Int, dayOfYear: Int, paint: YearPaint, bar: BarSegments?) {
+    val date = remember(year, dayOfYear) { LocalDate.ofYearDay(year, dayOfYear) }
+    DayCell(date = date, paint = paint, corner = 3.dp, borderWidth = 1.5.dp) {
+        if (bar != null) Box(Modifier.matchParentSize().eventBar(bar.colors))
     }
 }

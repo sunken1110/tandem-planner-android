@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.sunken1110.tandemplanner"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "2.0"
+        versionCode = 6
+        versionName = "2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -26,6 +26,12 @@ android {
 //                enable = true
 //                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
 //            }
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            matchingFallbacks += listOf("release")
         }
     }
     compileOptions {
@@ -46,6 +52,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.splashscreen)
     implementation(platform("com.google.firebase:firebase-bom:35.0.2"))
     implementation("com.google.firebase:firebase-auth")

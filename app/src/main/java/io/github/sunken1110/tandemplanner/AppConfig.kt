@@ -44,3 +44,19 @@ internal const val INTRO_HOLD_MS = 900L
 
 /** Cross-fade duration from the intro image to the main screen. */
 internal const val INTRO_OUT_MS = 700
+
+// ── Month view selection ring ──
+
+/**
+ * Draw the selection ring's glow with GPU blur (Android 12+): one blurred layer
+ * per glow step (2 in light mode, 3 in dark mode). Set to `false` to compare with
+ * (or fall back to) the blur-mask glow, which Android 11 and below always use.
+ */
+internal const val USE_GPU_GLOW = true
+
+/**
+ * Debug: show the GPU glow layers *without* blur (thick sharp strokes). If they
+ * appear, the layers render and only the blur needs tuning; if not, the layers
+ * themselves aren't drawn. Must be `false` in release builds.
+ */
+internal const val DEBUG_GLOW_NO_BLUR = false

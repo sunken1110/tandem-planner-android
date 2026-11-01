@@ -1,6 +1,5 @@
 package io.github.sunken1110.tandemplanner.ui.year
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
@@ -58,23 +58,15 @@ fun SeasonBanner(season: Season, onClose: () -> Unit) {
  * days left in the current season, and the season legend.
  *
  * @param shownCount day count currently displayed (follows the fill animation).
+ *        A lambda, so the animating value is read here and doesn't recompose the caller.
  */
 @Composable
-fun YearHeader(paint: YearPaint, shownCount: Int) {
+fun YearHeader(paint: YearPaint, shownCount: () -> Int) {
     val today = paint.today
     val season = Season.of(today.monthValue)
 
     Text("${paint.year}년", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Row(verticalAlignment = Alignment.Bottom) {
-        Text("${shownCount}일 지남", fontSize = 28.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "/ ${paint.totalDays}일 (${"%.1f".format(shownCount * 100f / paint.totalDays)}%)",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-    }
+    DayCount(totalDays = paint.totalDays, shownCount = shownCount)
     Spacer(Modifier.height(8.dp))
 
     GradientProgressBar(paint)
@@ -128,23 +120,42 @@ private fun GradientProgressBar(paint: YearPaint) {
     val stops = remember(paint.dayColors) {
         (0 until total step 4).map { i -> (i / (total - 1f)) to paint.dayColors[i] }.toTypedArray()
     }
-    Canvas(
+    Spacer(
         Modifier
             .fillMaxWidth()
             .height(8.dp)
-    ) {
-        val radius = CornerRadius(size.height / 2, size.height / 2)
-        drawRoundRect(color = trackColor, cornerRadius = radius)
-        val progress = paint.fill().coerceAtMost(paint.passedDays.toFloat())
-        val filledWidth = size.width * progress / total
-        if (filledWidth > 0f) {
-            // Gradient spans the full width; only the elapsed part is revealed.
-            clipRect(right = filledWidth) {
-                drawRoundRect(
-                    brush = Brush.horizontalGradient(*stops, startX = 0f, endX = size.width),
-                    cornerRadius = radius
-                )
+            // Brush and radius are built once per size; only the clip moves per frame.
+            .drawWithCache {
+                val radius = CornerRadius(size.height / 2, size.height / 2)
+                val brush = Brush.horizontalGradient(*stops, startX = 0f, endX = size.width)
+                onDrawBehind {
+                    drawRoundRect(color = trackColor, cornerRadius = radius)
+                    val progress = paint.fill().coerceAtMost(paint.passedDays.toFloat())
+                    val filledWidth = size.width * progress / total
+                    if (filledWidth > 0f) {
+                        // Gradient spans the full width; only the elapsed part is revealed.
+                        clipRect(right = filledWidth) { drawRoundRect(brush = brush, cornerRadius = radius) }
+                    }
+                }
             }
-        }
+    )
+}
+
+/**
+ * "N일 지남 / 365일 (x%)". Its own composable, so the count animating during the
+ * year fill recomposes only this row, not the whole header.
+ */
+@Composable
+private fun DayCount(totalDays: Int, shownCount: () -> Int) {
+    val count = shownCount()
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text("${count}일 지남", fontSize = 28.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "/ ${totalDays}일 (${"%.1f".format(count * 100f / totalDays)}%)",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
     }
 }
