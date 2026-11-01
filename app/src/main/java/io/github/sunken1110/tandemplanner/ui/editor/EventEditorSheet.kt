@@ -1,0 +1,268 @@
+package io.github.sunken1110.tandemplanner.ui.editor
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.sunken1110.tandemplanner.ai.TimeRecall
+import io.github.sunken1110.tandemplanner.ai.TimeSuggestion
+import io.github.sunken1110.tandemplanner.data.Event
+import io.github.sunken1110.tandemplanner.data.EventDraft
+import io.github.sunken1110.tandemplanner.ui.common.koreanLabel
+import io.github.sunken1110.tandemplanner.ui.common.koreanShort
+import io.github.sunken1110.tandemplanner.ui.common.weekendColor
+import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.LocalTime
+import kotlin.time.Duration.Companion.milliseconds
+
+/** Wait this long after typing stops before looking up past events, so the hint doesn't flicker. */
+private const val RECALL_DEBOUNCE_MS = 300
+
+/** Default time when the user first turns a time on: the next full hour. */
+private fun nextFullHour(): LocalTime = LocalTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+
+/** "10월 30일 (금)" */
+private fun LocalDate.koreanLabel(): String = "${monthValue}월 ${dayOfMonth}일 (${dayOfWeek.koreanShort()})"
+
+/**
+ * Bottom sheet for creating an event.
+ *
+ * Used both by the month view's "+ 일정 추가" (empty draft) and by the quick-add
+ * bar (draft pre-filled by a parser), so parsed results can be checked and
+ * corrected in the same place before saving.
+ *
+ * Also used to edit an existing event (pre-filled draft, [saveLabel] "수정").
+ *
+ * @param history past events used to suggest a time for similar titles (see [TimeRecall]).
+ * @param saveLabel text on the confirm button.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventEditorSheet(
+    initial: EventDraft,
+    history: List<Event>,
+    onDismiss: () -> Unit,
+    onSave: (EventDraft) -> Unit,
+    saveLabel: String = "저장"
+) {
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var date by remember { mutableStateOf(initial.date) }
+    var time by remember { mutableStateOf(initial.time) }
+    // A legacy free-form time ("저녁쯤"), kept until the user picks a time themselves.
+    var rawTime by remember { mutableStateOf(initial.rawTime) }
+    fun pickTime(t: LocalTime?) {
+        time = t
+        rawTime = null
+    }
+    var title by remember { mutableStateOf(initial.title) }
+    var showError by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+
+    // Last chosen time, kept so the wheel doesn't jump while it collapses after "시간 없음".
+    var lastTime by remember { mutableStateOf(initial.time ?: nextFullHour()) }
+    LaunchedEffect(time) { time?.let { lastTime = it } }
+
+    // Time recalled from past events with a similar title, looked up once typing pauses.
+    var suggestion by remember { mutableStateOf<TimeSuggestion?>(null) }
+    var lastHint by remember { mutableStateOf<TimeSuggestion?>(null) }
+    LaunchedEffect(title, history) {
+        delay(RECALL_DEBOUNCE_MS.milliseconds)
+        suggestion = TimeRecall.suggest(title, history)
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .imePadding()
+                // Scroll instead of squeezing the content when the keyboard takes space.
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+        ) {
+            // ── Date (stepper, so parsed dates can be nudged) ──
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { haptics.tap(); date = date.minusDays(1) }) { Text("‹", fontSize = 20.sp) }
+                Text(
+                    date.koreanLabel(),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = date.dayOfWeek.weekendColor() ?: MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center
+                )
+                TextButton(onClick = { haptics.tap(); date = date.plusDays(1) }) { Text("›", fontSize = 20.sp) }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // ── Title ──
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it; showError = false },
+                label = { Text("일정 내용") },
+                singleLine = true,
+                isError = showError,
+                supportingText = if (showError) {
+                    { Text("일정 내용을 입력해 주세요") }
+                } else null,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ── Time ──
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("시간", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    time?.koreanLabel() ?: rawTime ?: "시간 없음",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (time != null || rawTime != null) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    // Neither chip is selected while a legacy free-form time is kept.
+                    selected = time == null && rawTime == null,
+                    onClick = { haptics.tap(); pickTime(null) },
+                    label = { Text("시간 없음") }
+                )
+                FilterChip(
+                    selected = time != null,
+                    onClick = { haptics.tap(); if (time == null) pickTime(lastTime) },
+                    label = { Text("시간 지정") }
+                )
+            }
+
+            // History-based hint; hidden once its time is already chosen.
+            val hint = suggestion?.takeIf { it.time != time }
+            SideEffect { if (hint != null) lastHint = hint }
+            AnimatedVisibility(
+                visible = hint != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                // While animating out, keep showing the hint that was there.
+                (hint ?: lastHint)?.let { s ->
+                    RecallHint(s, onApply = { haptics.tap(); pickTime(s.time) })
+                }
+            }
+
+            // The wheel appears whenever a time is set.
+            AnimatedVisibility(
+                visible = time != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                TimeWheel(
+                    time = time ?: lastTime,
+                    // Ignore changes from a wheel still settling while it collapses after "시간 없음".
+                    onTimeChange = { transform -> time?.let { pickTime(transform(it)) } },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = {
+                    if (saving) return@Button
+                    if (title.isBlank()) {
+                        showError = true
+                        haptics.reject()
+                        return@Button
+                    }
+                    haptics.confirm()
+                    saving = true
+                    val draft = EventDraft(date, time, title.trim(), rawTime = if (time == null) rawTime else null)
+                    // Let the sheet slide away before handing the result back.
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { onSave(draft) }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text(saveLabel, fontSize = 16.sp) }
+        }
+    }
+}
+
+/**
+ * Small "과거 이력 기반 추천" line with a tappable time:
+ * `과거 이력 기반 추천 · '필라테스' 3회    [오후 8:00 적용]`
+ */
+@Composable
+private fun RecallHint(suggestion: TimeSuggestion, onApply: () -> Unit) {
+    val basis = suggestion.basis.let { if (it.length > 12) it.take(12) + "…" else it }
+    val times = if (suggestion.count > 1) " ${suggestion.count}회" else ""
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f))
+            .clickable(onClick = onApply)
+            .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "과거 이력 기반 추천 · '$basis'$times",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onApply) {
+            Text("${suggestion.time.koreanLabel()} 적용", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
