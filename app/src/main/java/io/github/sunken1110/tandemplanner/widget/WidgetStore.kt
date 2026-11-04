@@ -1,6 +1,7 @@
 package io.github.sunken1110.tandemplanner.widget
 
 import android.content.Context
+import androidx.core.content.edit
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import io.github.sunken1110.tandemplanner.data.Event
@@ -54,10 +55,10 @@ object WidgetStore {
                     .put("color", item.color.toArgb())
             )
         }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_LINKED, linked)
-            .putString(KEY_ITEMS, json.toString())
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putBoolean(KEY_LINKED, linked)
+            putString(KEY_ITEMS, json.toString())
+        }
     }
 
     /** The saved snapshot; anything unreadable is skipped rather than failing the widget. */

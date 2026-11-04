@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget-list preview only: a D-day pill at the D-1 step. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#F1A9C4" />
+    <corners android:radius="50dp" />
+</shape>

@@ -85,7 +85,7 @@ const val MAX_PREVIEW_TITLES = 2
  * The result keeps time order.
  *
  * Members are told apart by [colorOf] (one color per seat) rather than by raw
- * account id, so events written before and after a reinstall count as the same
+ * account id, so events written before and after reinstalling count as the same
  * person.
  */
 fun List<Event>.previewEvents(colorOf: (String) -> Color): List<Event> {

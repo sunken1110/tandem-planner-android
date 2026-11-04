@@ -1,7 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.year
 
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,7 +45,6 @@ import java.time.YearMonth
  * @param state hoisted by the caller so the scroll position survives a trip to
  *        the month view (the grid itself is disposed meanwhile).
  */
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun YearGrid(
     paint: YearPaint,

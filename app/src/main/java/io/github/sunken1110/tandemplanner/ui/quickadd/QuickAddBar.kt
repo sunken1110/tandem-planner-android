@@ -57,7 +57,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
-/** Wait this long after typing stops before re-parsing (keeps future AI calls cheap). */
+/** Wait this long after typing stops before parsing again (keeps future AI calls cheap). */
 private const val PREVIEW_DEBOUNCE_MS = 250
 
 /**
@@ -66,6 +66,8 @@ private const val PREVIEW_DEBOUNCE_MS = 250
  * While typing, a small preview row shows how the sentence is understood
  * (date · time · title), so users learn what works before submitting.
  * Parsing goes through [EventParser], so swapping in an AI model needs no UI change.
+ *
+ * @param leading shown left of the bar (the checklist button).
  */
 @Composable
 fun QuickAddBar(
@@ -73,7 +75,8 @@ fun QuickAddBar(
     today: LocalDate,
     onSubmit: (EventDraft) -> Unit,
     modifier: Modifier = Modifier,
-    focusRequest: Int = 0
+    focusRequest: Int = 0,
+    leading: (@Composable () -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -118,55 +121,61 @@ fun QuickAddBar(
             preview?.let { PreviewRow(it, today) }
         }
 
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                Modifier.padding(start = 18.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (leading != null) {
+                leading()
+                Spacer(Modifier.width(8.dp))
+            }
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 6.dp,
+                modifier = Modifier.weight(1f)
             ) {
-                // Four-season swirl: marks this as the "smart" input.
-                Box(
-                    Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(Brush.sweepGradient(Season.entries.map { it.color }))
-                )
-                Spacer(Modifier.width(12.dp))
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    textStyle = LocalTextStyle.current.copy(
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester),
-                    decorationBox = { field ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (text.isEmpty()) {
-                                Text(
-                                    "빠르게 추가",
-                                    fontSize = 15.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                Row(
+                    Modifier.padding(start = 18.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Four-season swirl: marks this as the "smart" input.
+                    Box(
+                        Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(Brush.sweepGradient(Season.entries.map { it.color }))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submit() }),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester),
+                        decorationBox = { field ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (text.isEmpty()) {
+                                    Text(
+                                        "빠르게 추가",
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                field()
                             }
-                            field()
                         }
+                    )
+                    TextButton(onClick = { submit() }, enabled = text.isNotBlank()) {
+                        Text("추가", fontWeight = FontWeight.Medium)
                     }
-                )
-                TextButton(onClick = { submit() }, enabled = text.isNotBlank()) {
-                    Text("추가", fontWeight = FontWeight.Medium)
                 }
             }
         }

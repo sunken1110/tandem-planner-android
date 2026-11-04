@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -71,7 +70,12 @@ import kotlinx.coroutines.flow.debounce
 import io.github.sunken1110.tandemplanner.data.nextUpcoming
 import java.time.LocalTime
 import kotlin.time.Duration.Companion.seconds
+import io.github.sunken1110.tandemplanner.data.ChecklistChange
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.SharedChecklists
+import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistButton
+import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistSheet
+import io.github.sunken1110.tandemplanner.ui.checklist.allDoneMessage
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.model.isSeasonFirstDay
@@ -119,7 +123,7 @@ private const val WARM_UP_MS = 1200
  * @param startFill the year fill animation starts only when this becomes true
  *        (i.e. after the intro overlay is gone).
  */
-@OptIn(ExperimentalSharedTransitionApi::class, FlowPreview::class)
+@OptIn(FlowPreview::class)
 @Composable
 fun CalendarScreen(
     calendar: SharedCalendar,
@@ -242,6 +246,27 @@ fun CalendarScreen(
             .debounce(800.milliseconds)
             .collect { runCatching { WidgetUpdater.publish(context, calendar) } }
     }
+    // ── Shared checklists ──
+    val checklists = remember(calendar) { SharedChecklists(calendar, context) }
+    DisposableEffect(calendar.roomCode) {
+        checklists.start()
+        onDispose { checklists.stop() }
+    }
+    var checklistOpen by rememberSaveable { mutableStateOf(false) }
+    // The list to open directly (an event's checklist chip), or null for all lists.
+    var checklistTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    fun openChecklist(listId: String?) {
+        checklistTarget = listId
+        checklistOpen = true
+    }
+    // The other member finished a list while the sheet is closed: say so here.
+    var notice by remember { mutableStateOf<ChecklistChange.AllDone?>(null) }
+    LaunchedEffect(checklists) {
+        checklists.changes.collect { change ->
+            if (change is ChecklistChange.AllDone && !checklistOpen) notice = change
+        }
+    }
+
     // A widget tap: open the requested day (this year only), or focus quick add.
     var quickAddFocus by remember { mutableIntStateOf(0) }
     LaunchedEffect(launchRequest?.token) {
@@ -416,6 +441,14 @@ fun CalendarScreen(
                             nameOf = nameOf,
                             editorNameOf = { e -> e.editedByUid?.let { calendar.displayName(it, e.editedByName.orEmpty()) } },
                             isMine = { e -> calendar.isMe(e.authorUid) },
+                            checklistFor = { e -> checklists.summaryFor(e.id) },
+                            onOpenChecklist = { openChecklist(it) },
+                            // The event's list, or a new one named after the event.
+                            onEventChecklist = { event, title ->
+                                val listId = checklists.summaryFor(event.id)?.listId
+                                    ?: checklists.createList(title, eventId = event.id)
+                                listId?.let { openChecklist(it) }
+                            },
                             initialSelectedDate = focusDate,
                             focusToken = focusToken,
                             onAddEvent = saveDraft,
@@ -424,8 +457,11 @@ fun CalendarScreen(
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
-                            onPrev = { if (month > 1) selectedMonth = month - 1 },
-                            onNext = { if (month < 12) selectedMonth = month + 1 }
+                            // A requested day (D-day card, widget, quick add) is shown once:
+                            // after moving to another month, coming back opens normally,
+                            // at the top with the whole grid in view.
+                            onPrev = { if (month > 1) { focusDate = null; selectedMonth = month - 1 } },
+                            onNext = { if (month < 12) { focusDate = null; selectedMonth = month + 1 } }
                         )
                     }
                 }
@@ -438,6 +474,16 @@ fun CalendarScreen(
             today = today,
             onSubmit = { quickDraft = it },
             focusRequest = quickAddFocus,
+            leading = {
+                ChecklistButton(
+                    remaining = checklists.remainingCount,
+                    season = season,
+                    onClick = {
+                        haptics.tap()
+                        openChecklist(null)
+                    }
+                )
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
@@ -479,6 +525,60 @@ fun CalendarScreen(
                 calendar.lastError = null
             }
         }
+
+        // ── "민지님이 마지막 항목을 체크했어요" (while the checklists are closed) ──
+        val shownNotice = notice
+        AnimatedVisibility(
+            visible = shownNotice != null && error == null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = QUICK_ADD_CLEARANCE + 8.dp)
+        ) {
+            var last by remember { mutableStateOf(shownNotice) }
+            LaunchedEffect(shownNotice) { if (shownNotice != null) last = shownNotice }
+            val n = shownNotice ?: last
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.inverseSurface)
+                    .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    n?.let { allDoneMessage(calendar.displayName(it.by, "상대"), it.title) }.orEmpty(),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                TextButton(onClick = {
+                    n?.let { openChecklist(it.listId) }
+                    notice = null
+                }) { Text("보기", color = MaterialTheme.colorScheme.inversePrimary) }
+            }
+        }
+        LaunchedEffect(shownNotice) {
+            if (shownNotice != null) {
+                delay(ERROR_VISIBLE_MS.milliseconds)
+                notice = null
+            }
+        }
+    }
+
+    if (checklistOpen) {
+        ChecklistSheet(
+            checklists = checklists,
+            calendar = calendar,
+            today = today,
+            initialListId = checklistTarget,
+            onDismiss = {
+                checklistOpen = false
+                checklistTarget = null
+            }
+        )
     }
 
     if (showShare) {

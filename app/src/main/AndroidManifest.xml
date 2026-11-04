@@ -25,6 +25,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <receiver
             android:name=".widget.TandemWidgetReceiver"
             android:exported="true"
@@ -35,6 +44,30 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/tandem_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.TandemTileWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_tile_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tandem_widget_tile_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.TandemListWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_list_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/tandem_widget_list_info" />
         </receiver>
     </application>
 

@@ -2,7 +2,13 @@ package io.github.sunken1110.tandemplanner.widget
 
 import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.updateAll
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import androidx.glance.GlanceId
+import androidx.glance.appwidget.compose
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -60,14 +66,57 @@ object WidgetUpdater {
 
     /** Redraws every placed widget (if any) and plans the next timed redraw. */
     suspend fun render(context: Context) {
-        if (!hasWidgets(context)) return
-        TandemWidget().updateAll(context)
+        val ids = placedIds(context)
+        if (ids.isEmpty()) return
+        ids.forEach { runCatching { refresh(context, it) } }
         scheduleTick(context)
     }
 
-    private suspend fun hasWidgets(context: Context): Boolean =
-        runCatching { GlanceAppWidgetManager(context).getGlanceIds(TandemWidget::class.java).isNotEmpty() }
-            .getOrDefault(false)
+    /**
+     * Redraws one widget, right away.
+     *
+     * Glance normally draws widgets in a background job (a "session"), and Android
+     * may hold that job back while the app is in the background, so changes showed
+     * up seconds late. Instead, the widget is drawn here directly ([compose]) and
+     * handed to Android's widget manager. Only if that fails does it fall back to
+     * Glance's usual (slower) update.
+     *
+     * The refresh stamp is bumped first, so a running session also redraws.
+     * Returns that stamp; the widget reports it back once drawn
+     * ([WidgetStyleStore.renderedStamp]).
+     */
+    suspend fun refresh(context: Context, id: GlanceId): Long {
+        val stamp = System.currentTimeMillis()
+        updateAppWidgetState(context, id) { it[RefreshStamp] = stamp }
+        val direct = runCatching {
+            val glanceManager = GlanceAppWidgetManager(context)
+            val appWidgetId = glanceManager.getAppWidgetId(id)
+            val manager = AppWidgetManager.getInstance(context)
+            val state = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+            val views = TandemWidget().compose(
+                context = context,
+                id = id,
+                options = manager.getAppWidgetOptions(appWidgetId),
+                state = state
+            )
+            manager.updateAppWidget(appWidgetId, views)
+        }
+        if (direct.isFailure) TandemWidget().update(context, id)
+        return stamp
+    }
+
+    /** All placed widgets, of every kind. */
+    private suspend fun placedIds(context: Context): List<GlanceId> = runCatching {
+        val manager = GlanceAppWidgetManager(context)
+        AllWidgetKinds.flatMap { manager.getGlanceIds(it) }
+    }.getOrDefault(emptyList())
+
+    /** True while at least one widget of any kind is on a home screen. */
+    fun anyWidgetPlaced(context: Context): Boolean = runCatching {
+        val manager = AppWidgetManager.getInstance(context)
+        listOf(TandemWidgetReceiver::class.java, TandemTileWidgetReceiver::class.java, TandemListWidgetReceiver::class.java)
+            .any { manager.getAppWidgetIds(ComponentName(context, it)).isNotEmpty() }
+    }.getOrDefault(false)
 
     /** Starts the hourly server refresh (only runs with a network connection). */
     fun schedulePeriodic(context: Context) {
@@ -96,7 +145,7 @@ object WidgetUpdater {
         val today = now.toLocalDate()
         val midnight = today.plusDays(1).atStartOfDay()
         // Times are stored as "HH:mm"; an event "passes" one minute after its time.
-        val nextTimed = WidgetStore.load(context).items
+        val nextTimed = WidgetStore.load(context).items.asSequence()
             .map { it.event }
             .filter { it.date == today && !it.isMultiDay }
             .mapNotNull { e -> runCatching { LocalTime.parse(e.time) }.getOrNull() }

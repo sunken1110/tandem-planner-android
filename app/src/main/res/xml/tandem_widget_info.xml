@@ -1,21 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Home-screen widget definition (D-day card).
-  Default size 4x1; resizable from 2x1 up to about 4x3. Content adapts to the size
+  2x1 card entry. Resizable from 1x1 up to about 4x3; content adapts to the size
   (see TandemWidget.kt). updatePeriodMillis is 0: refreshes are scheduled by the app
   (WorkManager) instead of the system's 30-minute minimum timer.
+  configure: the background settings screen opens when the widget is placed;
+  "reconfigurable" lets the user reopen it later from the widget's long-press menu.
+  Some attributes (previewLayout, targetCell*, maxResize*, widgetFeatures) only
+  exist on newer Android versions; older ones simply ignore them, which is fine
+  here, so lint's "UnusedAttribute" warning is turned off for this file.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedAttribute"
     android:description="@string/widget_description"
+    android:previewLayout="@layout/widget_preview_card"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:minWidth="110dp"
     android:minHeight="40dp"
-    android:minResizeWidth="110dp"
+    android:minResizeWidth="40dp"
     android:minResizeHeight="40dp"
     android:maxResizeWidth="530dp"
     android:maxResizeHeight="280dp"
-    android:targetCellWidth="4"
+    android:targetCellWidth="2"
     android:targetCellHeight="1"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="0"
-    android:widgetCategory="home_screen" />
+    android:widgetCategory="home_screen"
+    android:configure="io.github.sunken1110.tandemplanner.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable" />

@@ -3,7 +3,6 @@ package io.github.sunken1110.tandemplanner.ui.month
 import android.graphics.BlurMaskFilter
 import android.graphics.Matrix
 import android.graphics.SweepGradient
-import android.os.Build
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -204,7 +203,7 @@ fun ringPulse(lap: Float?): Float {
  *   The source is thick on purpose: blurring a thin line spreads its light so far
  *   that it all but vanishes. Blur radii are fixed and breathing only changes the
  *   layers' alpha, so the blur is computed once and reused.
- * - Blur mask (older versions, or [USE_GPU_GLOW] off): [drawOuterGlow] with a fixed
+ * - Blur mask ([USE_GPU_GLOW] off): [drawOuterGlow] with a fixed
  *   radius, so the blurred shape is rasterized once and reused; fading and
  *   breathing use the layer's alpha and scale ([outerGlowAlpha], [outerGlowScale]).
  *
@@ -212,7 +211,7 @@ fun ringPulse(lap: Float?): Float {
  */
 class SelectionRingPainter {
     /** True when the glow is drawn as GPU-blurred layers (see the class docs). */
-    val gpuGlow = USE_GPU_GLOW && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val gpuGlow = USE_GPU_GLOW
 
     /** The GPU glow layers for a style, drawn bottom to top. */
     fun gpuGlowLayers(style: RingStyle): List<GlowLayer> =
@@ -238,7 +237,6 @@ class SelectionRingPainter {
         )
     }
 
-    private val blurMaskSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
     private val paint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         style = FrameworkPaint.Style.STROKE
     }
@@ -353,12 +351,10 @@ class SelectionRingPainter {
                 // A white-hot current running through the light, soft-edged as well.
                 if (running) {
                     val currentWidth = width + NEON_CURRENT_EXTRA_WIDTH.toPx()
-                    if (blurMaskSupported) {
-                        stroke(
-                            topLeft, size, corner, currentWidth, Color.White, NEON_CURRENT_BLUR.toPx(), pulse,
-                            shader = bandShader(center, p, colors.glow)
-                        )
-                    }
+                    stroke(
+                        topLeft, size, corner, currentWidth, Color.White, NEON_CURRENT_BLUR.toPx(), pulse,
+                        shader = bandShader(center, p, colors.glow)
+                    )
                     stroke(
                         topLeft, size, corner, currentWidth, Color.White, cssBlur(NEON_WHITE_BLUR).toPx(), pulse,
                         shader = bandShader(center, p, Color.White)
@@ -383,22 +379,6 @@ class SelectionRingPainter {
         shader: android.graphics.Shader? = null
     ) {
         if (alpha <= 0f) return
-        if (blur > 0f && !blurMaskSupported) {
-            // Android 8.x fallback: three wider, fainter strokes approximate the blur.
-            // A moving light (shader) is drawn unblurred instead.
-            if (shader != null) return stroke(topLeft, size, corner, width, color, 0f, alpha, shader)
-            for (i in 1..3) {
-                drawRoundRect(
-                    color = color,
-                    topLeft = topLeft,
-                    size = size,
-                    cornerRadius = corner,
-                    alpha = (alpha * 0.22f / i).coerceIn(0f, 1f),
-                    style = Stroke(width + blur * i * 0.7f)
-                )
-            }
-            return
-        }
         paint.strokeWidth = width
         paint.shader = shader
         paint.color = color.copy(alpha = alpha.coerceIn(0f, 1f)).toArgb()

@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.ai.TimeRecall
 import io.github.sunken1110.tandemplanner.ai.TimeSuggestion
+import io.github.sunken1110.tandemplanner.data.ChecklistSummary
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
 import io.github.sunken1110.tandemplanner.currentDate
@@ -52,6 +56,8 @@ import io.github.sunken1110.tandemplanner.data.MAX_EVENT_DAYS
 import io.github.sunken1110.tandemplanner.model.KoreanHolidays
 import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
 import androidx.compose.ui.graphics.Color
+import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistIcon
+import io.github.sunken1110.tandemplanner.ui.checklist.CompleteGreen
 import io.github.sunken1110.tandemplanner.ui.common.koreanLabel
 import io.github.sunken1110.tandemplanner.ui.common.koreanShort
 import io.github.sunken1110.tandemplanner.ui.common.weekendColor
@@ -97,6 +103,10 @@ private fun LocalDate.labelColor(): Color? =
  *
  * @param history past events used to suggest a time for similar titles (see [TimeRecall]).
  * @param saveLabel text on the confirm button.
+ * @param checklist the checklist already linked to the event being edited, if any.
+ * @param onChecklist shows a "체크리스트" row (existing events only) that opens the
+ *        linked checklist or makes one. It gets the edited version when something
+ *        was changed (to save first), or null when nothing was.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,7 +115,9 @@ fun EventEditorSheet(
     history: List<Event>,
     onDismiss: () -> Unit,
     onSave: (EventDraft) -> Unit,
-    saveLabel: String = "저장"
+    saveLabel: String = "저장",
+    checklist: ChecklistSummary? = null,
+    onChecklist: ((edited: EventDraft?) -> Unit)? = null
 ) {
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
@@ -115,7 +127,7 @@ fun EventEditorSheet(
     // Last day of a multi-day event; null = one day.
     var endDate by remember { mutableStateOf(initial.endDate?.takeIf { it.isAfter(initial.date) }) }
     // Remembered length, so switching "여러 날" off and on again keeps it.
-    var lastSpanDays by remember { mutableStateOf(endDate?.let { ChronoUnit.DAYS.between(initial.date, it) } ?: 1L) }
+    var lastSpanDays by remember { mutableLongStateOf(endDate?.let { ChronoUnit.DAYS.between(initial.date, it) } ?: 1L) }
     LaunchedEffect(endDate, date) { endDate?.let { lastSpanDays = ChronoUnit.DAYS.between(date, it) } }
     val multiDay = endDate != null
     /** Moves the start day, keeping the event's length. */
@@ -144,6 +156,13 @@ fun EventEditorSheet(
     LaunchedEffect(title, history) {
         delay(RECALL_DEBOUNCE_MS.milliseconds)
         suggestion = TimeRecall.suggest(title, history)
+    }
+
+    /** What the sheet would save right now. */
+    fun currentDraft(): EventDraft = if (multiDay) {
+        EventDraft(date, null, title.trim(), endDate = endDate)
+    } else {
+        EventDraft(date, time, title.trim(), rawTime = if (time == null) rawTime else null)
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -306,6 +325,19 @@ fun EventEditorSheet(
                 )
             }
 
+            // ── Checklist (existing events only) ──
+            if (onChecklist != null) {
+                Spacer(Modifier.height(16.dp))
+                ChecklistRow(checklist, onClick = {
+                    if (saving) return@ChecklistRow
+                    haptics.tap()
+                    saving = true
+                    // Unsaved edits are saved on the way, so nothing typed is lost.
+                    val edited = currentDraft().takeIf { title.isNotBlank() && it != normalized(initial) }
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { onChecklist(edited) }
+                })
+            }
+
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = {
@@ -317,11 +349,7 @@ fun EventEditorSheet(
                     }
                     haptics.confirm()
                     saving = true
-                    val draft = if (multiDay) {
-                        EventDraft(date, null, title.trim(), endDate = endDate)
-                    } else {
-                        EventDraft(date, time, title.trim(), rawTime = if (time == null) rawTime else null)
-                    }
+                    val draft = currentDraft()
                     // Let the sheet slide away before handing the result back.
                     scope.launch { sheetState.hide() }.invokeOnCompletion { onSave(draft) }
                 },
@@ -331,6 +359,52 @@ fun EventEditorSheet(
                 shape = RoundedCornerShape(14.dp)
             ) { Text(saveLabel, fontSize = 16.sp) }
         }
+    }
+}
+
+/** [draft] in the shape [EventEditorSheet] saves, so "was anything changed?" is a plain comparison. */
+private fun normalized(draft: EventDraft): EventDraft = if (draft.endDate != null) {
+    EventDraft(draft.date, null, draft.title.trim(), endDate = draft.endDate)
+} else {
+    EventDraft(draft.date, draft.time, draft.title.trim(), rawTime = if (draft.time == null) draft.rawTime else null)
+}
+
+/**
+ * "체크리스트 만들기", or the linked list with its progress ("☑ 제주 여행 3/8 · 열기").
+ */
+@Composable
+private fun ChecklistRow(summary: ChecklistSummary?, onClick: () -> Unit) {
+    val complete = summary?.progress?.complete == true
+    val tint = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ChecklistIcon(color = tint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            when {
+                summary == null -> "체크리스트 만들기"
+                complete -> "${summary.title} · 모두 완료"
+                else -> "${summary.title} ${summary.progress.done}/${summary.progress.total}"
+            },
+            fontSize = 15.sp,
+            color = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            if (summary == null) "›" else "열기",
+            fontSize = if (summary == null) 18.sp else 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (summary == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+        )
     }
 }
 

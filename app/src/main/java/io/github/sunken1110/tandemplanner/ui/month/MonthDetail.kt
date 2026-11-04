@@ -1,14 +1,12 @@
 package io.github.sunken1110.tandemplanner.ui.month
 
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.Animatable as ColorAnimatable
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
@@ -17,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -32,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.DEBUG_GLOW_NO_BLUR
+import io.github.sunken1110.tandemplanner.data.ChecklistSummary
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
 import io.github.sunken1110.tandemplanner.model.KoreanHolidays
@@ -83,7 +84,7 @@ import io.github.sunken1110.tandemplanner.ui.common.parseStoredTime
 import io.github.sunken1110.tandemplanner.ui.common.weekendColor
 import io.github.sunken1110.tandemplanner.ui.editor.EventEditorSheet
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
-import android.provider.Settings
+import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -91,7 +92,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
@@ -148,18 +148,6 @@ private suspend fun popRing(scale: Animatable<Float, AnimationVector1D>) {
     scale.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
 }
 
-/**
- * True when the system "remove animations" setting is on (animator duration
- * scale 0), in which case decorative motion is skipped.
- */
-@Composable
-private fun rememberReduceMotion(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
-}
-
 /** Dark season tone used for today's number badge. */
 private fun deepTone(base: Color): Color = lerp(base, Color.Black, 0.45f)
 
@@ -191,8 +179,11 @@ private fun deepTone(base: Color): Color = lerp(base, Color.Black, 0.45f)
  *        shown mid-lap from the start, so its drawing code and GPU shaders get
  *        prepared too (normally the first lap only starts after 2.9 s).
  * @param editorNameOf resolves the display name of the member who edited an event.
+ * @param checklistFor the checklist linked to an event, shown as a chip under it.
+ * @param onOpenChecklist opens a checklist (tapping that chip).
+ * @param onEventChecklist from the event editor's "체크리스트" row: opens the event's
+ *        checklist, or makes one named after the event (the title it is given) and opens it.
  */
-@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun MonthDetail(
     yearMonth: YearMonth,
@@ -206,6 +197,9 @@ fun MonthDetail(
     nameOf: (Event) -> String,
     editorNameOf: (Event) -> String? = { it.editedByName },
     isMine: (Event) -> Boolean = { true },
+    checklistFor: (Event) -> ChecklistSummary? = { null },
+    onOpenChecklist: (listId: String) -> Unit = {},
+    onEventChecklist: ((event: Event, title: String) -> Unit)? = null,
     onAddEvent: (EventDraft) -> Unit,
     onUpdateEvent: (Event, EventDraft) -> Unit,
     onDeleteEvent: (Event) -> Unit,
@@ -216,9 +210,7 @@ fun MonthDetail(
 ) {
     val haptics = rememberHaptics()
     val density = LocalDensity.current
-    val season = Season.of(yearMonth.monthValue)
     val daysInMonth = yearMonth.lengthOfMonth()
-    val passedInMonth = (1..daysInMonth).count { paint.isPast(yearMonth.atDay(it)) }
 
     // Initial selection: the requested date, else today in the current month, else the 1st.
     var selectedDay by rememberSaveable(yearMonth.monthValue, initialSelectedDate, focusToken) {
@@ -378,17 +370,33 @@ fun MonthDetail(
         }
     } else Modifier
 
+    // Only the part below the navigation bar scrolls, so "‹ 2026년" and "‹ 11월 ›"
+    // stay in view while the day's events are scrolled into view.
+    val scrollState = rememberScrollState()
+    // A thin line under the bar once content has scrolled beneath it.
+    val scrolled by remember { derivedStateOf { scrollState.value > 0 } }
+    val dividerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+
     Column(
         Modifier
             .fillMaxSize()
             .then(sharedModifier)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
-            .verticalScroll(rememberScrollState())
-            .padding(8.dp)
     ) {
-        // ── Navigation ──
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // ── Navigation (fixed) ──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)
+                .drawBehind {
+                    if (scrolled) {
+                        val y = size.height + 4.dp.toPx() - 0.5.dp.toPx()
+                        drawLine(dividerColor, Offset(-8.dp.toPx(), y), Offset(size.width + 8.dp.toPx(), y), 0.5.dp.toPx())
+                    }
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹ ${yearMonth.year}년") }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1) {
@@ -399,12 +407,15 @@ fun MonthDetail(
                 Text("›", fontSize = 20.sp)
             }
         }
-        Text(
-            "${season.label} · ${passedInMonth} / ${daysInMonth}일 지남",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 12.dp, bottom = 12.dp)
-        )
+
+        // ── Everything below scrolls ──
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(scrollState)
+                .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp)
+        ) {
 
         // ── Day grid, with the selection ring's glow and the ring on top ──
         // Three layers, so an animating ring never re-draws the ~35 cells:
@@ -687,6 +698,11 @@ fun MonthDetail(
                                     authorName = nameOf(e),
                                     authorColor = colorOf(e.authorUid),
                                     editorName = editorNameOf(e),
+                                    checklist = checklistFor(e),
+                                    onChecklistClick = { id ->
+                                        haptics.tap()
+                                        onOpenChecklist(id)
+                                    },
                                     onClick = {
                                         haptics.tap()
                                         editingEvent = e
@@ -702,6 +718,7 @@ fun MonthDetail(
                     }
                 }
             }
+        }
         }
     }
 
@@ -739,7 +756,15 @@ fun MonthDetail(
                     onUpdateEvent(event, draft)
                     editingEvent = null
                 },
-                saveLabel = "수정"
+                saveLabel = "수정",
+                checklist = checklistFor(event),
+                onChecklist = onEventChecklist?.let { open ->
+                    { edited ->
+                        edited?.let { onUpdateEvent(event, it) }
+                        editingEvent = null
+                        open(event, edited?.title ?: event.title)
+                    }
+                }
             )
         }
     }

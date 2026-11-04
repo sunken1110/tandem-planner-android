@@ -1,7 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.effects
 
 import android.content.Context
-import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -23,35 +22,18 @@ class Haptics(context: Context) {
     private enum class Kind { TICK, TAP, CONFIRM, REJECT }
 
     private val vibrator: Vibrator? =
-        if (Build.VERSION.SDK_INT >= 31) {
-            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-        }
+        context.getSystemService(VibratorManager::class.java)?.defaultVibrator
 
     private fun play(kind: Kind) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
-        if (Build.VERSION.SDK_INT >= 29) {
-            // Predefined effects (API 29+) are referenced only inside this check.
-            val effect = when (kind) {
-                Kind.TICK -> VibrationEffect.EFFECT_TICK
-                Kind.TAP -> VibrationEffect.EFFECT_CLICK
-                Kind.CONFIRM -> VibrationEffect.EFFECT_HEAVY_CLICK
-                Kind.REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK
-            }
-            v.vibrate(VibrationEffect.createPredefined(effect))
-        } else {
-            // Fallback for API 26–28: one-shot pulses approximating each effect.
-            val (durationMs, amplitude) = when (kind) {
-                Kind.TICK -> 5L to 60
-                Kind.TAP -> 12L to 120
-                Kind.CONFIRM -> 25L to 255
-                Kind.REJECT -> 40L to 180
-            }
-            v.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
+        val effect = when (kind) {
+            Kind.TICK -> VibrationEffect.EFFECT_TICK
+            Kind.TAP -> VibrationEffect.EFFECT_CLICK
+            Kind.CONFIRM -> VibrationEffect.EFFECT_HEAVY_CLICK
+            Kind.REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK
         }
+        v.vibrate(VibrationEffect.createPredefined(effect))
     }
 
     /** Very light tick: each step of a scrolling wheel. */

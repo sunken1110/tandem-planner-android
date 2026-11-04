@@ -14,6 +14,8 @@ rules_version = '2';
 // - Every field has a fixed type and size, so a bad write can't crash the other phone.
 // - After a reinstall, a member can take back their own seat with their recovery
 //   code (only its hash is stored here), and keeps authorship of their events.
+// - Shared checklists: both members can edit them, but who created an item and who
+//   last changed it can't be faked.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -249,6 +251,74 @@ service cloud.firestore {
           && (isAuthor(resource.data.authorUid)
                 ? !hasMarks(request.resource.data)
                 : otherMemberEditOk());
+      }
+
+      // ── Shared checklists ──
+      // Both members can read, check, edit, reorder and delete everything in a list
+      // (it's a shared list, like a note on the fridge). What the rules protect is
+      // who made what: `createdBy` must be the caller when created and never changes,
+      // and every item write names its writer in `lastBy`, so the other phone can
+      // show "민지님이 체크했어요" and can't be told a change came from someone else.
+
+      match /lists/{listId} {
+        // `title` 1–40 characters; `eventId` (optional) links the list to an event.
+        function validList(d) {
+          return d.keys().hasOnly(['title', 'createdBy', 'createdAt', 'updatedAt', 'eventId'])
+            && d.title is string && d.title.size() >= 1 && d.title.size() <= 40
+            && d.createdBy is string
+            && (!('eventId' in d) || (d.eventId is string && d.eventId.size() <= 64));
+        }
+
+        allow read, delete: if isMember(roomId);
+
+        allow create: if isMember(roomId)
+          && validList(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+
+        allow update: if isMember(roomId)
+          && validList(request.resource.data)
+          && !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['createdBy', 'createdAt']);
+
+        match /items/{itemId} {
+          // `text` 1–100 characters; `order` sorts the list (fractions allowed, so a
+          // moved item only needs its own number changed); `doneBy` = who checked it.
+          function validItem(d) {
+            return d.keys().hasOnly([
+                'text', 'done', 'doneBy', 'order', 'createdBy', 'createdAt', 'lastBy', 'updatedAt'
+              ])
+              && d.text is string && d.text.size() >= 1 && d.text.size() <= 100
+              && d.done is bool
+              && (!('doneBy' in d) || d.doneBy is string)
+              && d.order is number
+              && d.createdBy is string
+              && d.lastBy == request.auth.uid;
+          }
+
+          allow read, delete: if isMember(roomId);
+
+          allow create: if isMember(roomId)
+            && validItem(request.resource.data)
+            && request.resource.data.createdBy == request.auth.uid;
+
+          allow update: if isMember(roomId)
+            && validItem(request.resource.data)
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(['createdBy', 'createdAt']);
+        }
+      }
+
+      // ── Presence ("민지 보는 중") ──
+      // Each member writes only their own doc: which list they have open ("" = none)
+      // and when they last said so.
+      match /presence/{memberUid} {
+        allow read: if isMember(roomId);
+        allow delete: if isMember(roomId) && request.auth.uid == memberUid;
+        allow create, update: if isMember(roomId)
+          && request.auth.uid == memberUid
+          && request.resource.data.keys().hasOnly(['listId', 'at'])
+          && request.resource.data.listId is string
+          && request.resource.data.listId.size() <= 64;
       }
     }
   }

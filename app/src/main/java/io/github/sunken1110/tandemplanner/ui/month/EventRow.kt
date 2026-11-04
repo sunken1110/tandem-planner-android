@@ -28,8 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.sunken1110.tandemplanner.data.ChecklistSummary
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventSnapshot
+import io.github.sunken1110.tandemplanner.ui.checklist.CompleteGreen
 import io.github.sunken1110.tandemplanner.ui.common.koreanShort
 import io.github.sunken1110.tandemplanner.ui.common.displayTime
 import io.github.sunken1110.tandemplanner.ui.common.periodLabel
@@ -37,7 +39,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /**
- * One event in the day list: a season-colored side bar, an author chip,
+ * One event in the day list: a season-colored stripe on the left, an author chip,
  * time ("하루 종일" when none), title and a delete button.
  * Tapping the row (anywhere but the delete button) opens it for editing.
  *
@@ -46,6 +48,9 @@ import java.time.temporal.ChronoUnit
  *
  * A multi-day event shows its period and which of its days [day] is instead of a
  * time, e.g. "11월 3일 ~ 6일 · 2/4일째".
+ *
+ * A linked checklist shows as a small chip under the title ("☑ 여행 짐 3/8"),
+ * which opens the list.
  *
  * @param day the day whose list this row is in.
  * @param editorName display name of the member who edited it, used only when
@@ -59,6 +64,8 @@ fun EventRow(
     authorName: String,
     authorColor: Color,
     editorName: String?,
+    checklist: ChecklistSummary? = null,
+    onChecklistClick: (listId: String) -> Unit = {},
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -119,9 +126,34 @@ fun EventRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            if (checklist != null) {
+                Spacer(Modifier.height(5.dp))
+                ChecklistChip(checklist, onClick = { onChecklistClick(checklist.listId) })
+            }
         }
         TextButton(onClick = onDelete) { Text("삭제") }
     }
+}
+
+/** "☑ 여행 짐 3/8", or "✓ 여행 짐 · 모두 완료" in green once everything is checked. */
+@Composable
+private fun ChecklistChip(summary: ChecklistSummary, onClick: () -> Unit) {
+    val complete = summary.progress.complete
+    val tint = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurfaceVariant
+    Text(
+        if (complete) "✓ ${summary.title} · 모두 완료"
+        else "☑ ${summary.title} ${summary.progress.done}/${summary.progress.total}",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = tint,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.12f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 3.dp)
+    )
 }
 
 /**

@@ -1,0 +1,715 @@
+package io.github.sunken1110.tandemplanner.ui.checklist
+
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import io.github.sunken1110.tandemplanner.data.ChecklistItem
+import io.github.sunken1110.tandemplanner.data.ChecklistList
+import io.github.sunken1110.tandemplanner.data.ChecklistProgress
+import io.github.sunken1110.tandemplanner.data.MAX_ITEM_TEXT
+import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.SharedChecklists
+import io.github.sunken1110.tandemplanner.model.Season
+import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
+import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import kotlin.math.abs
+import kotlin.math.sign
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+
+/** The check pops first; the write (which moves the row) follows after this. */
+private val CHECK_WRITE_DELAY = 200.milliseconds
+
+/** Swiping a row farther than this share of its width deletes it. */
+private const val SWIPE_DELETE_FRACTION = 0.35f
+
+/** While dragging near the top or bottom edge, the list scrolls by this much per move. */
+private const val EDGE_SCROLL_PX = 14f
+
+private const val GESTURE_CANCEL = 0
+private const val GESTURE_TAP = 1
+private const val GESTURE_SWIPE = 2
+
+private val ROW_SHAPE = RoundedCornerShape(12.dp)
+
+/**
+ * One open checklist: progress, the items (open ones first, then checked ones),
+ * and a field to add more.
+ *
+ * - Tap a row: check / uncheck (the box pops, then the row moves to its section).
+ * - Swipe a row sideways: delete, with "되돌리기" for a few seconds.
+ * - Long-press an open row, then drag: change the order.
+ * - Rows the other member just changed glow briefly; "민지 보는 중" shows when
+ *   they have the same list open.
+ * - Checking the last item (on either phone) runs a short celebration.
+ */
+@Composable
+internal fun ChecklistDetail(
+    list: ChecklistList,
+    checklists: SharedChecklists,
+    calendar: SharedCalendar,
+    today: LocalDate,
+    season: Season,
+    showToast: (SheetToast) -> Unit,
+    onBack: () -> Unit,
+    onRename: () -> Unit,
+    onLinkEvent: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val haptics = rememberHaptics()
+    val reduceMotion = rememberReduceMotion()
+    val scope = rememberCoroutineScope()
+    val all = checklists.itemsOf(list.id)
+    val progress = ChecklistProgress(all.count { it.done }, all.size)
+    val hideDone = checklists.isHidingDone(list.id)
+    val nameOf: (String) -> String = { calendar.displayName(it, "상대") }
+
+    // ── Celebration when the list becomes complete (not when opening a finished one) ──
+    var shineToken by remember { mutableIntStateOf(0) }
+    var burstToken by remember { mutableIntStateOf(0) }
+    var wasComplete by remember(list.id) { mutableStateOf(progress.complete) }
+    LaunchedEffect(progress.complete) {
+        if (progress.complete && !wasComplete) {
+            shineToken++
+            if (!reduceMotion) burstToken++
+            haptics.confirm()
+        }
+        wasComplete = progress.complete
+    }
+
+    // ── "민지 보는 중" (re-checked every few seconds, so it goes away on its own) ──
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5.seconds)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val viewers = checklists.viewersOf(list.id, nowMs)
+
+    // ── Reordering ──
+    // While dragging, the open items are shown from this working copy, rearranged
+    // as the row passes others; the new order is saved once on release.
+    val listState = rememberLazyListState()
+    var dragId by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf<List<ChecklistItem>>(emptyList()) }
+    var dragStartTop by remember { mutableFloatStateOf(0f) }
+    var dragDistance by remember { mutableFloatStateOf(0f) }
+    val openItems = all.filter { !it.done }
+    val todo = if (dragId != null) working else openItems
+    val done = all.filter { it.done }
+
+    fun startDrag(item: ChecklistItem) {
+        val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == todoKey(item.id) } ?: return
+        working = openItems
+        dragStartTop = info.offset.toFloat()
+        dragDistance = 0f
+        dragId = item.id
+        haptics.tap()
+    }
+
+    fun dragBy(dy: Float) {
+        val id = dragId ?: return
+        dragDistance += dy
+        val layout = listState.layoutInfo
+        val info = layout.visibleItemsInfo.firstOrNull { it.key == todoKey(id) } ?: return
+        val top = dragStartTop + dragDistance
+        val middle = top + info.size / 2f
+        val target = layout.visibleItemsInfo.firstOrNull {
+            val key = it.key as? String ?: return@firstOrNull false
+            key.startsWith(TODO_PREFIX) && key != info.key && middle >= it.offset && middle <= it.offset + it.size
+        }
+        if (target != null) {
+            val from = working.indexOfFirst { it.id == id }
+            val to = working.indexOfFirst { todoKey(it.id) == target.key }
+            if (from >= 0 && to >= 0) {
+                working = working.toMutableList().apply { add(to, removeAt(from)) }
+                haptics.tick()
+            }
+        }
+        // Near an edge: scroll, so the row can travel past what is on screen.
+        when {
+            top < layout.viewportStartOffset + info.size / 2 -> listState.dispatchRawDelta(-EDGE_SCROLL_PX)
+            top + info.size > layout.viewportEndOffset - info.size / 2 -> listState.dispatchRawDelta(EDGE_SCROLL_PX)
+        }
+    }
+
+    fun endDrag() {
+        val id = dragId ?: return
+        val index = working.indexOfFirst { it.id == id }
+        val item = working.getOrNull(index)
+        val before = openItems.indexOfFirst { it.id == id }
+        if (item != null && index != before) {
+            // Halfway between the new neighbors (or one step past the only one).
+            val prev = working.getOrNull(index - 1)?.order
+            val next = working.getOrNull(index + 1)?.order
+            val order = if (prev != null && next != null) {
+                (prev + next) / 2
+            } else if (prev != null) {
+                prev + 1.0
+            } else if (next != null) {
+                next - 1.0
+            } else {
+                item.order
+            }
+            checklists.move(item, order)
+        }
+        dragId = null
+        working = emptyList()
+    }
+
+    fun toggle(item: ChecklistItem, toDone: Boolean) {
+        val previousBy = item.doneBy
+        checklists.setDone(item, toDone)
+        // Unchecking the other member's check: offer to give it back.
+        if (!toDone && previousBy != null && !calendar.isMe(previousBy)) {
+            val name = nameOf(previousBy)
+            showToast(SheetToast("${name}님이 체크한 항목을 해제했어요", "되돌리기") {
+                checklists.setDone(item.copy(done = false), true, doneBy = previousBy)
+            })
+        }
+    }
+
+    fun delete(item: ChecklistItem) {
+        haptics.reject()
+        checklists.deleteItemLater(item)
+        showToast(SheetToast("‘${item.text}’ 삭제했어요", "되돌리기") { checklists.undoDelete(item.id) })
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // ── Header ──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹", fontSize = 22.sp) }
+            Text(
+                list.title,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            viewers.firstOrNull()?.let { uid ->
+                ViewingBadge(nameOf(uid), calendar.colorOf(uid), reduceMotion, Modifier.padding(start = 6.dp))
+            }
+            Box {
+                var menu by remember { mutableStateOf(false) }
+                TextButton(onClick = { haptics.tap(); menu = true }) { Text("⋮", fontSize = 20.sp) }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("이름 바꾸기") }, onClick = { menu = false; onRename() })
+                    DropdownMenuItem(
+                        text = { Text(if (list.eventId != null) "연결된 일정 바꾸기" else "일정에 연결") },
+                        onClick = { menu = false; onLinkEvent() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("리스트 삭제", color = MaterialTheme.colorScheme.error) },
+                        onClick = { menu = false; onDelete() }
+                    )
+                }
+            }
+        }
+
+        Column(Modifier.padding(horizontal = 20.dp)) {
+            // ── Linked event ──
+            calendar.events.firstOrNull { it.id == list.eventId }?.let { event ->
+                Text(
+                    linkedEventLabel(event, today),
+                    fontSize = 12.sp,
+                    color = calendar.colorOf(event.authorUid),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(calendar.colorOf(event.authorUid).copy(alpha = 0.12f))
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // ── Progress ──
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    if (progress.complete) "✓ 모두 완료했어요" else "${progress.done} / ${progress.total}",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (progress.complete) CompleteGreen else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                if (!progress.complete && progress.total > 0) {
+                    Text(
+                        "${progress.remaining}개 남음",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Box {
+                ChecklistProgressBar(progress.fraction, progress.complete, season, shineToken)
+                CelebrationBurst(burstToken, season, Modifier.matchParentSize())
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
+        // ── Items ──
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+        ) {
+            if (all.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        "아직 항목이 없어요. 아래에 적어 보세요.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 12.dp)
+                    )
+                }
+            }
+            items(todo, key = { todoKey(it.id) }) { item ->
+                val dragging = item.id == dragId
+                ChecklistRow(
+                    item = item,
+                    checkColor = calendar.colorOf(calendar.uid.orEmpty()),
+                    glowColor = calendar.colorOf(item.lastBy),
+                    doneByName = null,
+                    highlightAt = checklists.highlights[item.id],
+                    reduceMotion = reduceMotion,
+                    reorderable = true,
+                    dragging = dragging,
+                    onToggle = { toggle(item, true) },
+                    onDelete = { delete(item) },
+                    onDragStart = { startDrag(item) },
+                    onDrag = ::dragBy,
+                    onDragEnd = ::endDrag,
+                    modifier = if (dragging) {
+                        Modifier
+                            .zIndex(1f)
+                            .graphicsLayer {
+                                val now = listState.layoutInfo.visibleItemsInfo
+                                    .firstOrNull { it.key == todoKey(item.id) }?.offset ?: 0
+                                translationY = dragStartTop + dragDistance - now
+                            }
+                    } else Modifier.rowAnimation(this)
+                )
+            }
+            if (done.isNotEmpty()) {
+                item(key = "doneHeader") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .rowAnimation(this)
+                            .padding(start = 6.dp, top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "완료 ${done.size}개",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = {
+                            haptics.tap()
+                            checklists.setHidingDone(list.id, !hideDone)
+                        }) {
+                            Text(if (hideDone) "보이기" else "숨기기", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            if (!hideDone) {
+                items(done, key = { "d:${it.id}" }) { item ->
+                    val by = item.doneBy
+                    ChecklistRow(
+                        item = item,
+                        checkColor = calendar.colorOf(by ?: calendar.uid.orEmpty()),
+                        glowColor = calendar.colorOf(item.lastBy),
+                        doneByName = by?.let(nameOf),
+                        highlightAt = checklists.highlights[item.id],
+                        reduceMotion = reduceMotion,
+                        reorderable = false,
+                        dragging = false,
+                        onToggle = { toggle(item, false) },
+                        onDelete = { delete(item) },
+                        onDragStart = {},
+                        onDrag = {},
+                        onDragEnd = {},
+                        modifier = Modifier.rowAnimation(this)
+                    )
+                }
+            }
+            item(key = "bottom") { Spacer(Modifier.height(12.dp)) }
+        }
+
+        // ── Add ──
+        DashedInputField(
+            placeholder = "항목 추가",
+            maxLength = MAX_ITEM_TEXT,
+            season = season,
+            keepFocus = true,
+            onSubmit = { text ->
+                haptics.tap()
+                checklists.addItem(list.id, text)
+                // Keep the newest item in view.
+                scope.launch {
+                    delay(120.milliseconds)
+                    val count = listState.layoutInfo.totalItemsCount
+                    if (count > 0) listState.animateScrollToItem((todo.size).coerceAtMost(count - 1))
+                }
+            },
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp)
+        )
+    }
+}
+
+private const val TODO_PREFIX = "t:"
+private fun todoKey(id: String) = TODO_PREFIX + id
+
+/** Rows fade in and out (moving between sections) and glide to new places. */
+private fun Modifier.rowAnimation(scope: LazyItemScope): Modifier = with(scope) {
+    animateItem(
+        fadeInSpec = tween(260),
+        placementSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        fadeOutSpec = tween(180)
+    )
+}
+
+/**
+ * One item: a round check box, the text, and (for checked items) who checked it.
+ * Gestures are told apart by hand, so a tap, a sideways swipe, a long press and
+ * a normal list scroll don't trip over each other.
+ */
+@Composable
+private fun ChecklistRow(
+    item: ChecklistItem,
+    checkColor: Color,
+    glowColor: Color,
+    doneByName: String?,
+    highlightAt: Long?,
+    reduceMotion: Boolean,
+    reorderable: Boolean,
+    dragging: Boolean,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+
+    // The box shows the new state at once; the write follows after the pop.
+    var shownDone by remember(item.id, item.done) { mutableStateOf(item.done) }
+    val pop = remember { Animatable(1f) }
+    val check by animateFloatAsState(if (shownDone) 1f else 0f, tween(180), label = "check")
+
+    fun tap() {
+        if (shownDone != item.done) return // already on its way
+        shownDone = !item.done
+        haptics.tick()
+        if (!reduceMotion) {
+            scope.launch {
+                pop.animateTo(1.28f, tween(90))
+                pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 600f))
+            }
+        }
+        scope.launch {
+            delay(CHECK_WRITE_DELAY)
+            onToggle()
+        }
+    }
+
+    // ── The other member's change: a light sweeps across the row ──
+    val glow = remember { Animatable(-1f) }
+    LaunchedEffect(highlightAt) {
+        val at = highlightAt ?: return@LaunchedEffect
+        if (SystemClock.elapsedRealtime() - at > SharedChecklists.HIGHLIGHT_MS) return@LaunchedEffect
+        glow.snapTo(0f)
+        glow.animateTo(1f, tween(1200))
+        glow.snapTo(-1f)
+    }
+
+    // ── Swipe to delete ──
+    var swipeX by remember { mutableFloatStateOf(0f) }
+    var widthPx by remember { mutableIntStateOf(0) }
+
+    val currentTap by rememberUpdatedState(::tap)
+    val currentDelete by rememberUpdatedState(onDelete)
+    val currentDragStart by rememberUpdatedState(onDragStart)
+    val currentDrag by rememberUpdatedState(onDrag)
+    val currentDragEnd by rememberUpdatedState(onDragEnd)
+
+    val lift by animateFloatAsState(if (dragging) 1f else 0f, tween(150), label = "lift")
+    val surface = MaterialTheme.colorScheme.surface
+
+    Box(
+        modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .onSizeChanged { widthPx = it.width }
+    ) {
+        // Revealed behind the row while swiping.
+        if (swipeX != 0f) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .clip(ROW_SHAPE)
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 18.dp),
+                contentAlignment = if (swipeX > 0) Alignment.CenterStart else Alignment.CenterEnd
+            ) {
+                Text("삭제", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    translationX = swipeX
+                    scaleX = 1f + 0.02f * lift
+                    scaleY = 1f + 0.02f * lift
+                }
+                .shadow((8 * lift).dp, ROW_SHAPE, clip = false)
+                .clip(ROW_SHAPE)
+                .background(surface.copy(alpha = if (dragging) 1f else 0.9f))
+                .drawBehind {
+                    val g = glow.value
+                    if (g < 0f) return@drawBehind
+                    drawRect(glowColor.copy(alpha = 0.12f * (1f - g)))
+                    if (!reduceMotion) {
+                        val x = -size.width * 0.4f + g * size.width * 1.8f
+                        drawRect(
+                            Brush.horizontalGradient(
+                                listOf(Color.Transparent, glowColor.copy(alpha = 0.32f), Color.Transparent),
+                                startX = x - size.width * 0.3f,
+                                endX = x + size.width * 0.3f
+                            )
+                        )
+                    }
+                }
+                .pointerInput(item.id, reorderable) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val kind = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            awaitGestureKind(down, viewConfiguration.touchSlop)
+                        }
+                        when (kind) {
+                            GESTURE_TAP -> currentTap()
+                            GESTURE_SWIPE -> {
+                                horizontalDrag(down.id) { change ->
+                                    swipeX += change.positionChange().x
+                                    change.consume()
+                                }
+                                val limit = widthPx * SWIPE_DELETE_FRACTION
+                                val target = if (abs(swipeX) > limit) sign(swipeX) * widthPx else 0f
+                                scope.launch {
+                                    animate(swipeX, target, animationSpec = tween(180)) { v, _ -> swipeX = v }
+                                    if (target != 0f) currentDelete()
+                                }
+                            }
+                            null -> {
+                                // Long press: pick the row up (open items only).
+                                if (!reorderable) return@awaitEachGesture
+                                currentDragStart()
+                                try {
+                                    drag(down.id) { change: PointerInputChange ->
+                                        currentDrag(change.positionChange().y)
+                                        change.consume()
+                                    }
+                                } finally {
+                                    currentDragEnd()
+                                }
+                            }
+                            else -> Unit // a scroll, or someone else took the touch
+                        }
+                    }
+                }
+                .semantics(mergeDescendants = true) {
+                    role = Role.Checkbox
+                    stateDescription = if (shownDone) "완료" else "미완료"
+                    onClick(label = if (shownDone) "체크 해제" else "체크") { currentTap(); true }
+                    customActions = listOf(CustomAccessibilityAction("삭제") { currentDelete(); true })
+                }
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CheckCircle(
+                progress = check,
+                color = checkColor,
+                modifier = Modifier
+                    .size(22.dp)
+                    .graphicsLayer {
+                        scaleX = pop.value
+                        scaleY = pop.value
+                    }
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                item.text,
+                fontSize = 15.sp,
+                color = if (shownDone) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (shownDone) TextDecoration.LineThrough else null,
+                modifier = Modifier.weight(1f)
+            )
+            if (doneByName != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(doneByName, fontSize = 11.sp, color = checkColor, maxLines = 1)
+            }
+            if (reorderable) {
+                Spacer(Modifier.width(8.dp))
+                Grip(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+            }
+        }
+    }
+}
+
+/**
+ * Waits for the first movement of a touch and says what it is: a tap (lifted
+ * in place), a sideways swipe, or a cancel (a vertical move, which the list
+ * scrolls, or a touch someone else consumed). Runs until one of those happens;
+ * the caller's timeout turns "still holding" into a long press.
+ */
+private suspend fun AwaitPointerEventScope.awaitGestureKind(
+    down: PointerInputChange,
+    slop: Float
+): Int {
+    var total = Offset.Zero
+    while (true) {
+        val event = awaitPointerEvent()
+        val change = event.changes.firstOrNull { it.id == down.id } ?: return GESTURE_CANCEL
+        if (change.changedToUpIgnoreConsumed()) {
+            if (change.isConsumed) return GESTURE_CANCEL
+            change.consume()
+            return GESTURE_TAP
+        }
+        if (change.isConsumed) return GESTURE_CANCEL
+        total += change.positionChange()
+        if (abs(total.x) > slop && abs(total.x) > abs(total.y) * 1.2f) return GESTURE_SWIPE
+        if (abs(total.y) > slop) return GESTURE_CANCEL
+    }
+}
+
+/** Round check box: an outline when open; filled in [color] with a drawn-in check when done. */
+@Composable
+private fun CheckCircle(progress: Float, color: Color, modifier: Modifier = Modifier) {
+    val outline = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+    Canvas(modifier) {
+        val r = size.minDimension / 2
+        val stroke = 1.8.dp.toPx()
+        if (progress < 1f) {
+            drawCircle(outline.copy(alpha = outline.alpha * (1f - progress)), r - stroke / 2, style = Stroke(stroke))
+        }
+        if (progress > 0f) {
+            drawCircle(color.copy(alpha = progress), r * (0.6f + 0.4f * progress))
+            // The check is drawn in from its left end.
+            val path = Path().apply {
+                moveTo(size.width * 0.28f, size.height * 0.52f)
+                lineTo(size.width * 0.44f, size.height * 0.67f)
+                lineTo(size.width * 0.73f, size.height * 0.36f)
+            }
+            val measure = PathMeasure().apply { setPath(path, false) }
+            val partial = Path()
+            measure.getSegment(0f, measure.length * progress, partial, true)
+            drawPath(partial, Color.White, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+}
+
+/** Six faint dots: "this row can be moved" (long-press it). */
+@Composable
+private fun Grip(color: Color) {
+    Canvas(Modifier.size(width = 8.dp, height = 14.dp)) {
+        val r = 1.3.dp.toPx()
+        for (col in 0..1) for (row in 0..2) {
+            drawCircle(color, r, Offset(size.width * (0.25f + 0.5f * col), size.height * (0.17f + 0.33f * row)))
+        }
+    }
+}

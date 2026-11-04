@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Shown in the home screen's widget picker. -->
-    <string name="widget_name">Tandem D-day</string>
-    <string name="widget_description">다음 일정까지 남은 날과 다가오는 일정을 보여 줘요</string>
+    <!-- Shown in the home screen's widget list: one entry per starting size. -->
+    <string name="widget_name">Tandem 다음 일정</string>
+    <string name="widget_description">다음 일정과 D-day를 카드로 보여 줘요</string>
+    <string name="widget_tile_name">Tandem D-day</string>
+    <string name="widget_tile_description">다음 일정까지 남은 날을 한 칸에 크게 보여 줘요</string>
+    <string name="widget_list_name">Tandem 일정 목록</string>
+    <string name="widget_list_description">다음 일정과 다가오는 일정 두 개를 보여 줘요</string>
 </resources>

@@ -3,6 +3,7 @@ package io.github.sunken1110.tandemplanner.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import androidx.core.content.edit
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +24,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.LocalDate
 import kotlin.random.asKotlinRandom
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -47,7 +49,7 @@ private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine {
  * - Reinstalling the app creates a new anonymous account. Each member therefore
  *   keeps a personal recovery code ("1-ABCD-EFGH-JKLM": seat + secret); with it a
  *   new account can take over the old seat ([recoverSeat]). `formerUids` maps old
- *   accounts to their successors, so events written before a reinstall still
+ *   accounts to their successors, so events written before reinstalling still
  *   count as the same person (color, name, author rights) — see [currentUid].
  * - Firestore keeps an on-device cache, so reads and writes keep working offline
  *   and sync automatically once the connection returns.
@@ -71,7 +73,7 @@ class SharedCalendar(context: Context) {
         private set
     private var names by mutableStateOf<Map<String, String>>(emptyMap())
 
-    /** Old account → the account that took over its seat (after a reinstall). */
+    /** Old account → the account that took over its seat (after reinstalling). */
     private var formerUids by mutableStateOf<Map<String, String>>(emptyMap())
 
     /** Members that have a recovery code registered on the server. */
@@ -105,9 +107,9 @@ class SharedCalendar(context: Context) {
         lastError = if (cause == null) message else "$message (${cause.message})"
     }
 
-    /** Awaits a write with a timeout. Returns false and reports an error if it doesn't finish. */
+    /** Waits for a Firestore write to finish, with a timeout. Returns false and reports an error if it doesn't. */
     private suspend fun <T> Task<T>.awaitOnline(): Boolean {
-        val done = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { awaitResult(); true } != null
+        val done = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { awaitResult(); true } != null
         if (!done) reportError(MSG_OFFLINE)
         return done
     }
@@ -118,9 +120,10 @@ class SharedCalendar(context: Context) {
      * True when the phone has a working internet connection.
      *
      * Checked before creating or joining a room: Firestore queues writes made
-     * offline and sends them later, so a create/join that "timed out" would still
-     * happen behind the user's back (an orphan room, or a seat taken in a room
-     * whose code was never saved). Defaults to true if the check itself fails.
+     * offline and sends them later. So even after creating or joining a room
+     * "timed out", it could still happen behind the user's back (an orphan room,
+     * or a seat taken in a room whose code was never saved). Defaults to true if
+     * the check itself fails.
      */
     private fun isOnline(): Boolean = runCatching {
         val cm = appContext.getSystemService(ConnectivityManager::class.java)
@@ -138,7 +141,7 @@ class SharedCalendar(context: Context) {
     private suspend fun ensureSignedIn(): Boolean {
         auth.currentUser?.let { uid = it.uid; return true }
         return try {
-            val result = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { auth.signInAnonymously().awaitResult() }
+            val result = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { auth.signInAnonymously().awaitResult() }
             uid = result?.user?.uid
             if (result == null) reportError(MSG_OFFLINE)
             uid != null
@@ -215,7 +218,7 @@ class SharedCalendar(context: Context) {
                 saveRoom(code, name)
                 // Usually seat 1; read it to be sure (e.g. rejoining with the same account).
                 val seat = runCatching {
-                    withTimeoutOrNull(NETWORK_TIMEOUT_MS) { room(code).get(Source.SERVER).awaitResult() }
+                    withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get(Source.SERVER).awaitResult() }
                         ?.let { (it.get("members") as? List<*>)?.indexOf(me) }
                 }.getOrNull()?.takeIf { it >= 0 } ?: 1
                 saveRecoveryCode(seat, secret)
@@ -238,7 +241,10 @@ class SharedCalendar(context: Context) {
     }
 
     private fun saveRoom(code: String, name: String) {
-        prefs.edit().putString(KEY_ROOM, code).putString(KEY_NAME, name).apply()
+        prefs.edit {
+            putString(KEY_ROOM, code)
+            putString(KEY_NAME, name)
+        }
         roomCode = code
         myName = name
         lastError = null
@@ -272,7 +278,7 @@ class SharedCalendar(context: Context) {
     }
 
     /**
-     * Takes back a seat after a reinstall, with the room code and that seat's
+     * Takes back a seat after reinstalling, with the room code and that seat's
      * recovery code. Steps (each checked by the security rules):
      * 1. Prove the code: write it to `claims/{me}`; the rules only accept it if it
      *    matches the seat's stored hash.
@@ -317,7 +323,7 @@ class SharedCalendar(context: Context) {
 
         return try {
             // 2. Take over the seat.
-            val snap = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { room(code).get(Source.SERVER).awaitResult() }
+            val snap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get(Source.SERVER).awaitResult() }
                 ?: run { reportError(MSG_OFFLINE); return false }
             val roomMembers = (snap.get("members") as? List<*>).orEmpty().filterIsInstance<String>()
             val old = roomMembers.getOrNull(seat) ?: run { reportError(MSG_RECOVER_FAILED); return false }
@@ -352,9 +358,9 @@ class SharedCalendar(context: Context) {
 
     private fun saveRecoveryCode(seat: Int, secret: String) {
         val display = formatRecoveryCode(seat, secret)
-        prefs.edit().putString(KEY_RECOVERY, display).apply()
+        prefs.edit { putString(KEY_RECOVERY, display) }
         recoveryCode = display
-        // The write has succeeded; don't wait for the room snapshot to say so.
+        // Saving has succeeded; don't wait for the room snapshot to say so.
         uid?.let { recoveryOwners = recoveryOwners + it }
     }
 
@@ -381,7 +387,7 @@ class SharedCalendar(context: Context) {
                 if (snap == null) return@addSnapshotListener
                 offline = snap.metadata.isFromCache
                 pendingWrites = snap.metadata.hasPendingWrites()
-                // A metadata-only update (e.g. a write reaching the server) changes no
+                // A metadata-only update (e.g. a saved change reaching the server) changes no
                 // events; skip rebuilding the list, which would regroup and re-sort
                 // everything and recompose every day cell.
                 if (snap.documentChanges.isEmpty() && events.isNotEmpty()) return@addSnapshotListener
@@ -400,13 +406,13 @@ class SharedCalendar(context: Context) {
      */
     suspend fun refreshOnce(): Boolean {
         val code = roomCode ?: return false
-        if (auth.currentUser == null) return false
+        auth.currentUser ?: return false
         return try {
-            val roomSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS) { room(code).get().awaitResult() }
+            val roomSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get().awaitResult() }
                 ?: return false
             if (!roomSnap.exists()) return false
             applyRoom(roomSnap)
-            val eventsSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
+            val eventsSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) {
                 room(code).collection("events").get().awaitResult()
             } ?: return false
             val list = eventsSnap.documents.mapNotNull(::parseEvent)
@@ -481,7 +487,7 @@ class SharedCalendar(context: Context) {
         val code = roomCode ?: return
         val me = uid ?: return
         val end = endDate?.takeIf { it.isAfter(date) }
-        val data = mutableMapOf<String, Any>(
+        val data = mutableMapOf(
             "date" to date.toString(),
             "time" to if (end != null) "" else time,
             "title" to title,
@@ -514,7 +520,7 @@ class SharedCalendar(context: Context) {
         val end = endDate?.takeIf { it.isAfter(date) }
         val storedTime = if (end != null) "" else time
         val next = EventSnapshot(date, storedTime, title, end)
-        val updates = mutableMapOf<String, Any>(
+        val updates = mutableMapOf(
             "date" to date.toString(),
             "time" to storedTime,
             "title" to title,
@@ -558,7 +564,7 @@ class SharedCalendar(context: Context) {
     fun rename(newName: String) {
         val code = roomCode ?: return
         val me = uid ?: return
-        prefs.edit().putString(KEY_NAME, newName).apply()
+        prefs.edit { putString(KEY_NAME, newName) }
         myName = newName
         room(code).update("names.$me", newName)
             .addOnFailureListener { reportError("이름을 바꾸지 못했어요.", it) }
@@ -566,7 +572,7 @@ class SharedCalendar(context: Context) {
 
     /**
      * The account currently in [accountUid]'s seat: the account itself, or the one
-     * that took it over after a reinstall (following any chain of recoveries).
+     * that took it over after reinstalling (following any chain of recoveries).
      */
     fun currentUid(accountUid: String): String {
         var current = accountUid
@@ -574,7 +580,7 @@ class SharedCalendar(context: Context) {
         return current
     }
 
-    /** True when [accountUid] is this member (now or before a reinstall). */
+    /** True when [accountUid] is this member (now or before reinstalling). */
     fun isMe(accountUid: String): Boolean = uid != null && currentUid(accountUid) == uid
 
     /**
