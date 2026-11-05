@@ -40,6 +40,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -58,7 +61,7 @@ import kotlin.random.Random
 private const val BURST_MS = 1300
 
 /** Number of pieces in the completion burst. */
-private const val BURST_PIECES = 34
+private const val BURST_PIECES = 30
 
 /**
  * The list's progress bar. Its fill glides to each new value; once everything is
@@ -127,29 +130,32 @@ private class Piece(
     val spin: Float,
     val size: Float,
     val color: Color,
-    val round: Boolean
+    /** Start of a piece's side-to-side sway, so they don't all sway together. */
+    val phase: Float
 )
 
 /**
- * A short burst of season-colored confetti from the center of this box, each
- * time [token] changes (but not on first composition). Draws outside its own
- * bounds, so a small box under the progress bar is enough.
+ * A short burst from the center of this box each time [token] changes (but not on
+ * first composition), shaped by [season] like the background particles: spring
+ * petals and autumn leaves drift down swaying, summer light bubbles float up,
+ * winter snowflakes turn as they fall. Draws outside its own bounds, so a small
+ * box under the progress bar is enough.
  */
 @Composable
 fun CelebrationBurst(token: Int, season: Season, modifier: Modifier = Modifier) {
     val t = remember { Animatable(1f) }
-    val pieces = remember(token) {
+    val pieces = remember(token, season) {
         val rnd = Random(token * 7919 + 13)
-        val colors = season.colors + CompleteGreen + Color.White
+        val colors = season.colors + Color.White
         List(BURST_PIECES) {
             Piece(
                 // Mostly upward, fanning out to both sides.
-                angle = (-PI / 2 + (rnd.nextFloat() - 0.5f) * PI * 1.25f).toFloat(),
+                angle = (-PI / 2 + (rnd.nextFloat() - 0.5f) * PI * 1.2f).toFloat(),
                 speed = 0.55f + rnd.nextFloat() * 0.6f,
                 spin = (rnd.nextFloat() - 0.5f) * 4f,
-                size = 0.7f + rnd.nextFloat() * 0.7f,
+                size = 0.8f + rnd.nextFloat() * 0.7f,
                 color = colors[rnd.nextInt(colors.size)],
-                round = rnd.nextBoolean()
+                phase = rnd.nextFloat() * 2f * PI.toFloat()
             )
         }
     }
@@ -162,26 +168,65 @@ fun CelebrationBurst(token: Int, season: Season, modifier: Modifier = Modifier) 
         val p = t.value
         if (p >= 1f) return@Canvas
         val reach = 170.dp.toPx()
-        val gravity = 260.dp.toPx()
+        val fall = 220.dp.toPx()
+        val sway = 12.dp.toPx()
         val base = 5.dp.toPx()
         val origin = Offset(size.width / 2, size.height / 2)
-        // Ease out the launch, then let gravity pull the pieces down.
+        // Ease out the launch, then let the season's motion take over.
         val travel = 1f - (1f - p) * (1f - p)
         val alpha = (1f - p * p).coerceIn(0f, 1f)
         pieces.forEach { piece ->
-            val x = origin.x + cos(piece.angle) * reach * piece.speed * travel
-            val y = origin.y + sin(piece.angle) * reach * piece.speed * travel + gravity * p * p * 0.6f
+            val swayX = when (season) {
+                Season.SPRING, Season.AUTUMN -> sin(p * 9f + piece.phase) * sway * p
+                else -> 0f
+            }
+            val drift = when (season) {
+                Season.SUMMER -> -fall * 0.25f * p // light rises
+                Season.WINTER -> fall * 0.45f * p * p // snow falls slowly
+                else -> fall * 0.6f * p * p
+            }
+            val center = Offset(
+                origin.x + cos(piece.angle) * reach * piece.speed * travel + swayX,
+                origin.y + sin(piece.angle) * reach * piece.speed * travel + drift
+            )
             val s = base * piece.size
-            if (piece.round) {
-                drawCircle(piece.color.copy(alpha = alpha), radius = s * 0.55f, center = Offset(x, y))
-            } else {
-                rotate(degrees = piece.spin * 360f * p, pivot = Offset(x, y)) {
-                    drawRoundRect(
-                        piece.color.copy(alpha = alpha),
-                        topLeft = Offset(x - s * 0.7f, y - s * 0.35f),
-                        size = Size(s * 1.4f, s * 0.7f),
-                        cornerRadius = CornerRadius(s * 0.2f)
+            val color = piece.color.copy(alpha = alpha)
+            val turn = piece.spin * 180f * p + if (season == Season.WINTER) p * 120f else 0f
+            rotate(degrees = turn, pivot = center) {
+                when (season) {
+                    Season.SPRING -> drawOval(
+                        color,
+                        topLeft = Offset(center.x - s * 1.1f, center.y - s * 0.55f),
+                        size = Size(s * 2.2f, s * 1.1f)
                     )
+                    Season.SUMMER -> {
+                        drawCircle(color, radius = s * 0.8f, center = center, style = Stroke(1.4.dp.toPx()))
+                        drawCircle(color.copy(alpha = alpha * 0.5f), radius = s * 0.22f, center = center + Offset(-s * 0.25f, -s * 0.25f))
+                    }
+                    Season.AUTUMN -> {
+                        val leaf = Path().apply {
+                            moveTo(center.x, center.y - s * 1.2f)
+                            quadraticTo(center.x + s, center.y - s * 0.2f, center.x, center.y + s * 1.2f)
+                            quadraticTo(center.x - s, center.y - s * 0.2f, center.x, center.y - s * 1.2f)
+                        }
+                        drawPath(leaf, color)
+                        drawLine(
+                            Color(0xFF854F0B).copy(alpha = alpha * 0.6f),
+                            Offset(center.x, center.y - s),
+                            Offset(center.x, center.y + s * 1.2f),
+                            0.8.dp.toPx()
+                        )
+                    }
+                    Season.WINTER -> repeat(3) { arm ->
+                        val a = arm * PI.toFloat() / 3f
+                        drawLine(
+                            color,
+                            Offset(center.x - cos(a) * s, center.y - sin(a) * s),
+                            Offset(center.x + cos(a) * s, center.y + sin(a) * s),
+                            1.4.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
                 }
             }
         }

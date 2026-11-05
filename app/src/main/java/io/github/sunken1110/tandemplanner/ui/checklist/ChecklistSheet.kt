@@ -51,12 +51,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.geometry.CornerRadius
@@ -94,6 +97,7 @@ import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
 import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.time.Duration.Companion.milliseconds
@@ -106,7 +110,11 @@ private val TOAST_VISIBLE = 4.seconds
  * The shared checklists, in a bottom sheet: first all lists (the hub), then one
  * list at a time ([ChecklistDetail]).
  *
- * @param initialListId open this list right away (from an event's checklist chip).
+ * @param initialListId open this list right away (from an event's checklist chip,
+ *        its editor, or a message). Going back then closes the sheet, back to the
+ *        calendar the list was opened from, instead of showing all lists.
+ * @param renameOnOpen the list was just made with a default name: open with its
+ *        name being edited, all selected, so typing replaces it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,19 +123,32 @@ fun ChecklistSheet(
     calendar: SharedCalendar,
     today: LocalDate,
     initialListId: String?,
+    renameOnOpen: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     val season = Season.of(today.monthValue)
     var openId by rememberSaveable { mutableStateOf(initialListId) }
     val open = openId?.let { id -> checklists.lists.firstOrNull { it.id == id } }
+    // Opened straight into a list: "back" means back to where it was opened from.
+    val direct = initialListId != null
 
-    // The open list was deleted (here or on the other phone): back to all lists.
+    /** Slides the sheet away, then closes it. */
+    fun close() {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+
+    fun back() {
+        if (direct) close() else openId = null
+    }
+
+    // The open list was deleted (here or on the other phone): leave it.
     // Waits a moment, since a list created just now takes a few ms to appear.
     LaunchedEffect(openId, open == null) {
         if (openId != null && open == null) {
             delay(1500.milliseconds)
-            openId = null
+            back()
         }
     }
 
@@ -163,7 +184,8 @@ fun ChecklistSheet(
     var deleting by remember { mutableStateOf<ChecklistList?>(null) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        BackHandler(enabled = openId != null) { openId = null }
+        // When opened straight into a list, the sheet's own back handling closes it.
+        BackHandler(enabled = openId != null && !direct) { openId = null }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -182,7 +204,10 @@ fun ChecklistSheet(
                 label = "checklistPage"
             ) { id ->
                 val list = id?.let { listId -> checklists.lists.firstOrNull { it.id == listId } }
-                if (list == null) {
+                if (list == null && direct) {
+                    // A list made a moment ago, not arrived yet: show nothing rather than all lists.
+                    Box(Modifier.fillMaxSize())
+                } else if (list == null) {
                     ChecklistHub(
                         checklists = checklists,
                         calendar = calendar,
@@ -199,7 +224,8 @@ fun ChecklistSheet(
                         today = today,
                         season = season,
                         showToast = { toast = it },
-                        onBack = { openId = null },
+                        startRenaming = renameOnOpen && list.id == initialListId,
+                        onBack = ::back,
                         onRename = { renaming = list },
                         onLinkEvent = { linking = list },
                         onDelete = { deleting = list }
@@ -267,7 +293,7 @@ fun ChecklistSheet(
                 TextButton(onClick = {
                     checklists.deleteList(list)
                     deleting = null
-                    openId = null
+                    back()
                 }) { Text("삭제", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("취소") } }
@@ -425,6 +451,7 @@ internal fun linkedEventLabel(event: Event, today: LocalDate): String {
  *
  * @param keepFocus true to stay in the field after each entry, for adding several
  *        items in a row; false to let go of it (a new list opens right after).
+ * @param focusRequester lets the caller put the cursor here.
  */
 @Composable
 internal fun DashedInputField(
@@ -433,7 +460,8 @@ internal fun DashedInputField(
     season: Season,
     keepFocus: Boolean,
     onSubmit: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
@@ -482,6 +510,7 @@ internal fun DashedInputField(
             keyboardActions = KeyboardActions(onSend = { submit() }),
             modifier = Modifier
                 .weight(1f)
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .onFocusChanged { focused = it.isFocused },
             decorationBox = { field ->
                 Box(contentAlignment = Alignment.CenterStart) {
@@ -542,7 +571,8 @@ private fun RenameDialog(current: String, onConfirm: (String) -> Unit, onDismiss
 /**
  * Picks the event a list belongs to, from a small month calendar: days with
  * events carry their authors' color dots; tapping a day lists its events
- * (a multi-day event shows on each of its days), and tapping one links it.
+ * (a multi-day event shows on each of its days). Tapping one selects it and
+ * paints its days on the calendar as a block; "연결" then links it.
  * Opens at the linked event's day, or today. Past events can be picked too.
  */
 @Composable
@@ -558,6 +588,9 @@ private fun LinkEventDialog(
     val start = events.firstOrNull { it.id == linkedId }?.date ?: today
     var month by remember { mutableStateOf(YearMonth.from(start)) }
     var selected by remember { mutableStateOf(start) }
+    var picked by remember { mutableStateOf(linkedId) }
+    var pickError by remember { mutableStateOf(false) }
+    val pickedEvent = events.firstOrNull { it.id == picked }
     val byDay = remember(events, month) {
         (1..month.lengthOfMonth()).associate { d ->
             val day = month.atDay(d)
@@ -618,6 +651,14 @@ private fun LinkEventDialog(
                             val day = month.atDay(n)
                             DayCellSmall(
                                 day = day,
+                                band = pickedEvent?.takeIf { it.covers(day) }?.let { e ->
+                                    PickedBand(
+                                        color = calendar.colorOf(e.authorUid),
+                                        // Rounded at the event's ends, and squared where a week row breaks it.
+                                        roundStart = day == e.date || column == 0 || n == 1,
+                                        roundEnd = day == e.lastDate || column == 6 || n == month.lengthOfMonth()
+                                    )
+                                },
                                 isToday = day == today,
                                 isSelected = day == selected,
                                 dots = byDay[day].orEmpty().map { calendar.colorOf(it.authorUid) }.distinct().take(3),
@@ -661,13 +702,17 @@ private fun LinkEventDialog(
                         )
                     }
                     dayEvents.forEach { event ->
-                        val isLinked = event.id == linkedId
+                        val isPicked = event.id == picked
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isLinked) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
-                                .clickable { onPick(event.id) }
+                                .background(if (isPicked) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+                                .clickable {
+                                    haptics.tick()
+                                    picked = event.id
+                                    pickError = false
+                                }
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -693,28 +738,61 @@ private fun LinkEventDialog(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            if (isLinked) Text("✓", color = MaterialTheme.colorScheme.primary)
+                            if (isPicked) Text("✓", color = MaterialTheme.colorScheme.primary)
                         }
                     }
+                }
+                if (pickError) {
+                    Text(
+                        "일정을 먼저 골라 주세요",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
                 }
             }
         },
         confirmButton = {
-            if (linkedId != null) {
-                TextButton(onClick = { onPick(null) }) { Text("연결 해제") }
-            }
+            TextButton(onClick = {
+                val id = picked
+                when {
+                    id == null -> {
+                        haptics.reject()
+                        pickError = true
+                    }
+                    id == linkedId -> onDismiss() // nothing changed
+                    else -> {
+                        haptics.confirm()
+                        onPick(id)
+                    }
+                }
+            }) { Text("연결") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+        dismissButton = {
+            Row {
+                if (linkedId != null) {
+                    TextButton(onClick = { onPick(null) }) { Text("연결 해제") }
+                }
+                TextButton(onClick = onDismiss) { Text("취소") }
+            }
+        }
     )
 }
+
+/** The picked event's days on the picker's calendar, and where its block ends round off. */
+private data class PickedBand(val color: Color, val roundStart: Boolean, val roundEnd: Boolean)
 
 /** Height of a day in the picker's calendar. */
 private val PICKER_CELL = 38.dp
 
-/** A day in the picker: its number (holidays red) and up to three authors' dots. */
+/**
+ * A day in the picker: its number (holidays red), up to three authors' dots, and
+ * behind the number a piece of the picked event's block when it covers this day.
+ */
 @Composable
 private fun DayCellSmall(
     day: LocalDate,
+    band: PickedBand?,
     isToday: Boolean,
     isSelected: Boolean,
     dots: List<Color>,
@@ -726,27 +804,51 @@ private fun DayCellSmall(
         KoreanHolidays.of(day) != null -> SundayRed
         else -> day.dayOfWeek.weekendColor() ?: MaterialTheme.colorScheme.onSurface
     }
+    // Not clipped: a block runs edge to edge into the neighboring days.
     Column(
         modifier
             .height(PICKER_CELL)
-            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             Modifier
                 .padding(top = 3.dp)
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent),
+                .fillMaxWidth()
+                .height(24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                day.dayOfMonth.toString(),
-                fontSize = 13.sp,
-                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isToday && !isSelected) MaterialTheme.colorScheme.primary else numberColor
-            )
+            if (band != null) {
+                val r = 12.dp
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(start = if (band.roundStart) 3.dp else 0.dp, end = if (band.roundEnd) 3.dp else 0.dp)
+                        .background(
+                            band.color.copy(alpha = 0.28f),
+                            RoundedCornerShape(
+                                topStart = if (band.roundStart) r else 0.dp,
+                                bottomStart = if (band.roundStart) r else 0.dp,
+                                topEnd = if (band.roundEnd) r else 0.dp,
+                                bottomEnd = if (band.roundEnd) r else 0.dp
+                            )
+                        )
+                )
+            }
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    day.dayOfMonth.toString(),
+                    fontSize = 13.sp,
+                    fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isToday && !isSelected) MaterialTheme.colorScheme.primary else numberColor
+                )
+            }
         }
         Row(
             Modifier.padding(top = 2.dp),

@@ -53,6 +53,7 @@ import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.EventDraft
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.MAX_EVENT_DAYS
+import io.github.sunken1110.tandemplanner.data.checklistLabel
 import io.github.sunken1110.tandemplanner.model.KoreanHolidays
 import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
 import androidx.compose.ui.graphics.Color
@@ -103,10 +104,10 @@ private fun LocalDate.labelColor(): Color? =
  *
  * @param history past events used to suggest a time for similar titles (see [TimeRecall]).
  * @param saveLabel text on the confirm button.
- * @param checklist the checklist already linked to the event being edited, if any.
- * @param onChecklist shows a "체크리스트" row (existing events only) that opens the
- *        linked checklist or makes one. It gets the edited version when something
- *        was changed (to save first), or null when nothing was.
+ * @param checklists the checklists already linked to the event being edited.
+ * @param onChecklist shows checklist rows (existing events only): one per linked
+ *        list, which opens it (its id), and "체크리스트 만들기" (id null). It gets the
+ *        edited version when something was changed (to save first), or null.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,8 +117,8 @@ fun EventEditorSheet(
     onDismiss: () -> Unit,
     onSave: (EventDraft) -> Unit,
     saveLabel: String = "저장",
-    checklist: ChecklistSummary? = null,
-    onChecklist: ((edited: EventDraft?) -> Unit)? = null
+    checklists: List<ChecklistSummary> = emptyList(),
+    onChecklist: ((edited: EventDraft?, listId: String?) -> Unit)? = null
 ) {
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
@@ -327,15 +328,21 @@ fun EventEditorSheet(
 
             // ── Checklist (existing events only) ──
             if (onChecklist != null) {
-                Spacer(Modifier.height(16.dp))
-                ChecklistRow(checklist, onClick = {
-                    if (saving) return@ChecklistRow
+                fun go(listId: String?) {
+                    if (saving) return
                     haptics.tap()
                     saving = true
                     // Unsaved edits are saved on the way, so nothing typed is lost.
                     val edited = currentDraft().takeIf { title.isNotBlank() && it != normalized(initial) }
-                    scope.launch { sheetState.hide() }.invokeOnCompletion { onChecklist(edited) }
-                })
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { onChecklist(edited, listId) }
+                }
+                Spacer(Modifier.height(16.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    checklists.forEach { summary ->
+                        ChecklistRow(summary, initial.title, onClick = { go(summary.listId) })
+                    }
+                    ChecklistRow(null, initial.title, onClick = { go(null) })
+                }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -370,11 +377,13 @@ private fun normalized(draft: EventDraft): EventDraft = if (draft.endDate != nul
 }
 
 /**
- * "체크리스트 만들기", or the linked list with its progress ("☑ 제주 여행 3/8 · 열기").
+ * "체크리스트 만들기", or the linked list with its progress ("체크리스트 3/8 · 열기"),
+ * named without repeating the event's title ([checklistLabel]).
  */
 @Composable
-private fun ChecklistRow(summary: ChecklistSummary?, onClick: () -> Unit) {
+private fun ChecklistRow(summary: ChecklistSummary?, eventTitle: String, onClick: () -> Unit) {
     val complete = summary?.progress?.complete == true
+    val name = summary?.let { checklistLabel(it.title, eventTitle) }
     val tint = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         Modifier
@@ -390,8 +399,8 @@ private fun ChecklistRow(summary: ChecklistSummary?, onClick: () -> Unit) {
         Text(
             when {
                 summary == null -> "체크리스트 만들기"
-                complete -> "${summary.title} · 모두 완료"
-                else -> "${summary.title} ${summary.progress.done}/${summary.progress.total}"
+                complete -> "$name · 모두 완료"
+                else -> "$name ${summary.progress.done}/${summary.progress.total}"
             },
             fontSize = 15.sp,
             color = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurface,

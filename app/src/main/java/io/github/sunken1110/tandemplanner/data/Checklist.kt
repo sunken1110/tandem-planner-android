@@ -74,6 +74,44 @@ data class ChecklistProgress(val done: Int, val total: Int) {
     val fraction: Float get() = if (total == 0) 0f else done.toFloat() / total
 }
 
+/** Ending of a list made from an event: "제주 여행" → "제주 여행 체크리스트". */
+private const val DEFAULT_SUFFIX = " 체크리스트"
+
+/**
+ * The name a list made from an event starts with, fitting [MAX_LIST_TITLE]:
+ * "제주 여행 체크리스트", or "제주 여행 체크리스트 2" (3, …) when one of [taken]
+ * (the event's other lists) already has that name.
+ */
+fun defaultChecklistTitle(eventTitle: String, taken: Collection<String> = emptyList()): String {
+    val used = taken.mapTo(HashSet()) { it.trim() }
+    var n = 1
+    while (true) {
+        val number = if (n == 1) "" else " $n"
+        val name = eventTitle.trim().take(MAX_LIST_TITLE - DEFAULT_SUFFIX.length - number.length) + DEFAULT_SUFFIX + number
+        if (name !in used) return name
+        n++
+    }
+}
+
+/**
+ * How a list is named right under its event, without repeating the event:
+ * a name that starts with the whole event title (as a word) shows only the rest
+ * ("제주 여행 짐" → "짐", "제주 여행 체크리스트" → "체크리스트"); a name that is just
+ * the event title shows "체크리스트"; any other name ("운동 준비물") stays as is.
+ */
+fun checklistLabel(listTitle: String, eventTitle: String): String {
+    val name = listTitle.trim()
+    val event = eventTitle.trim()
+    if (event.isEmpty() || !name.startsWith(event)) return name
+    val rest = name.substring(event.length)
+    return when {
+        rest.isBlank() -> "체크리스트"
+        // Only at a word break: "제주 여행지 맛집" under "제주 여행" stays whole.
+        rest.first().isWhitespace() -> rest.trim()
+        else -> name
+    }
+}
+
 /** What an event's day list shows about the checklist linked to it. */
 data class ChecklistSummary(val listId: String, val title: String, val progress: ChecklistProgress)
 
@@ -293,9 +331,11 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     val remainingCount: Int
         get() = lists.sumOf { progressOf(it.id).remaining }
 
-    /** The checklist linked to [eventId], for the event's row in the day list. */
-    fun summaryFor(eventId: String): ChecklistSummary? =
-        lists.firstOrNull { it.eventId == eventId }?.let { ChecklistSummary(it.id, it.title, progressOf(it.id)) }
+    /** The checklists linked to [eventId], oldest first, for the event's row in the day list. */
+    fun summariesFor(eventId: String): List<ChecklistSummary> =
+        lists.filter { it.eventId == eventId }
+            .sortedWith(compareBy<ChecklistList> { it.createdAtMs }.thenBy { it.id })
+            .map { ChecklistSummary(it.id, it.title, progressOf(it.id)) }
 
     /** Other members who have [listId] open right now ([nowMs] = wall clock). */
     fun viewersOf(listId: String, nowMs: Long): List<String> =

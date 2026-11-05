@@ -81,6 +81,19 @@ import io.github.sunken1110.tandemplanner.data.ChecklistItem
 import io.github.sunken1110.tandemplanner.data.ChecklistList
 import io.github.sunken1110.tandemplanner.data.ChecklistProgress
 import io.github.sunken1110.tandemplanner.data.MAX_ITEM_TEXT
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import io.github.sunken1110.tandemplanner.data.MAX_LIST_TITLE
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.model.Season
@@ -120,6 +133,10 @@ private val ROW_SHAPE = RoundedCornerShape(12.dp)
  * - Rows the other member just changed glow briefly; "민지 보는 중" shows when
  *   they have the same list open.
  * - Checking the last item (on either phone) runs a short celebration.
+ *
+ * @param startRenaming the list was just made with a default name: its name opens
+ *        for editing, all selected; Enter (or tapping elsewhere) keeps it, and the
+ *        cursor moves on to "항목 추가" for the first item.
  */
 @Composable
 internal fun ChecklistDetail(
@@ -129,6 +146,7 @@ internal fun ChecklistDetail(
     today: LocalDate,
     season: Season,
     showToast: (SheetToast) -> Unit,
+    startRenaming: Boolean = false,
     onBack: () -> Unit,
     onRename: () -> Unit,
     onLinkEvent: () -> Unit,
@@ -141,6 +159,8 @@ internal fun ChecklistDetail(
     val progress = ChecklistProgress(all.count { it.done }, all.size)
     val hideDone = checklists.isHidingDone(list.id)
     val nameOf: (String) -> String = { calendar.displayName(it, "상대") }
+    var renaming by remember(list.id) { mutableStateOf(startRenaming) }
+    val addFocus = remember { FocusRequester() }
 
     // ── Celebration when the list becomes complete (not when opening a finished one) ──
     var shineToken by remember { mutableIntStateOf(0) }
@@ -263,14 +283,26 @@ internal fun ChecklistDetail(
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹", fontSize = 22.sp) }
-            Text(
-                list.title,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
+            if (renaming) {
+                NameField(
+                    initial = list.title,
+                    onDone = { name ->
+                        renaming = false
+                        checklists.renameList(list, name)
+                        addFocus.requestFocus()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Text(
+                    list.title,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
             viewers.firstOrNull()?.let { uid ->
                 ViewingBadge(nameOf(uid), calendar.colorOf(uid), reduceMotion, Modifier.padding(start = 6.dp))
             }
@@ -434,6 +466,7 @@ internal fun ChecklistDetail(
             maxLength = MAX_ITEM_TEXT,
             season = season,
             keepFocus = true,
+            focusRequester = addFocus,
             onSubmit = { text ->
                 haptics.tap()
                 checklists.addItem(list.id, text)
@@ -448,6 +481,59 @@ internal fun ChecklistDetail(
         )
     }
 }
+
+/**
+ * The list's name as a text field, focused with the whole name selected, so
+ * typing replaces it. Done on Enter or when the field loses focus; an emptied
+ * name keeps the old one.
+ */
+@Composable
+private fun NameField(initial: String, onDone: (String) -> Unit, modifier: Modifier = Modifier) {
+    var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var focusedOnce by remember { mutableStateOf(false) }
+    var finished by remember { mutableStateOf(false) }
+    fun finish() {
+        if (finished) return
+        finished = true
+        onDone(value.text.trim().ifEmpty { initial })
+    }
+    // After the sheet has slid in, so the keyboard doesn't fight its animation.
+    LaunchedEffect(Unit) {
+        delay(NAME_FOCUS_DELAY)
+        focus.requestFocus()
+        keyboard?.show()
+    }
+    val accent = MaterialTheme.colorScheme.primary
+    BasicTextField(
+        value = value,
+        onValueChange = { if (it.text.length <= MAX_LIST_TITLE) value = it },
+        singleLine = true,
+        textStyle = LocalTextStyle.current.copy(
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        ),
+        cursorBrush = SolidColor(accent),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        // Handling Done here keeps the keyboard up for the item field that comes next.
+        keyboardActions = KeyboardActions(onDone = { finish() }),
+        modifier = modifier
+            .focusRequester(focus)
+            .onFocusChanged {
+                if (it.isFocused) focusedOnce = true else if (focusedOnce) finish()
+            }
+            .drawBehind {
+                val y = size.height - 1.dp.toPx()
+                drawLine(accent, Offset(0f, y), Offset(size.width, y), 2.dp.toPx())
+            }
+            .padding(vertical = 4.dp)
+    )
+}
+
+/** The name field waits this long for the sheet to finish sliding in. */
+private val NAME_FOCUS_DELAY = 350.milliseconds
 
 private const val TODO_PREFIX = "t:"
 private fun todoKey(id: String) = TODO_PREFIX + id

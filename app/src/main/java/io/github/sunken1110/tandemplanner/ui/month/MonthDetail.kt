@@ -179,10 +179,11 @@ private fun deepTone(base: Color): Color = lerp(base, Color.Black, 0.45f)
  *        shown mid-lap from the start, so its drawing code and GPU shaders get
  *        prepared too (normally the first lap only starts after 2.9 s).
  * @param editorNameOf resolves the display name of the member who edited an event.
- * @param checklistFor the checklist linked to an event, shown as a chip under it.
+ * @param checklistsFor the checklists linked to an event, shown as chips under it.
  * @param onOpenChecklist opens a checklist (tapping that chip).
- * @param onEventChecklist from the event editor's "체크리스트" row: opens the event's
- *        checklist, or makes one named after the event (the title it is given) and opens it.
+ * @param onEventChecklist from the event editor's checklist rows: opens one of the
+ *        event's checklists (its id), or with no id makes a new one named after the
+ *        event (the title it is given) and opens it.
  */
 @Composable
 fun MonthDetail(
@@ -197,9 +198,9 @@ fun MonthDetail(
     nameOf: (Event) -> String,
     editorNameOf: (Event) -> String? = { it.editedByName },
     isMine: (Event) -> Boolean = { true },
-    checklistFor: (Event) -> ChecklistSummary? = { null },
+    checklistsFor: (Event) -> List<ChecklistSummary> = { emptyList() },
     onOpenChecklist: (listId: String) -> Unit = {},
-    onEventChecklist: ((event: Event, title: String) -> Unit)? = null,
+    onEventChecklist: ((event: Event, title: String, listId: String?) -> Unit)? = null,
     onAddEvent: (EventDraft) -> Unit,
     onUpdateEvent: (Event, EventDraft) -> Unit,
     onDeleteEvent: (Event) -> Unit,
@@ -698,7 +699,7 @@ fun MonthDetail(
                                     authorName = nameOf(e),
                                     authorColor = colorOf(e.authorUid),
                                     editorName = editorNameOf(e),
-                                    checklist = checklistFor(e),
+                                    checklists = checklistsFor(e),
                                     onChecklistClick = { id ->
                                         haptics.tap()
                                         onOpenChecklist(id)
@@ -757,12 +758,12 @@ fun MonthDetail(
                     editingEvent = null
                 },
                 saveLabel = "수정",
-                checklist = checklistFor(event),
+                checklists = checklistsFor(event),
                 onChecklist = onEventChecklist?.let { open ->
-                    { edited ->
+                    { edited, listId ->
                         edited?.let { onUpdateEvent(event, it) }
                         editingEvent = null
-                        open(event, edited?.title ?: event.title)
+                        open(event, edited?.title ?: event.title, listId)
                     }
                 }
             )

@@ -73,6 +73,7 @@ import kotlin.time.Duration.Companion.seconds
 import io.github.sunken1110.tandemplanner.data.ChecklistChange
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
+import io.github.sunken1110.tandemplanner.data.defaultChecklistTitle
 import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistButton
 import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistSheet
 import io.github.sunken1110.tandemplanner.ui.checklist.allDoneMessage
@@ -255,8 +256,11 @@ fun CalendarScreen(
     var checklistOpen by rememberSaveable { mutableStateOf(false) }
     // The list to open directly (an event's checklist chip), or null for all lists.
     var checklistTarget by rememberSaveable { mutableStateOf<String?>(null) }
-    fun openChecklist(listId: String?) {
+    // The target was just made with a default name, to be edited right away.
+    var checklistRenameNew by rememberSaveable { mutableStateOf(false) }
+    fun openChecklist(listId: String?, renameNew: Boolean = false) {
         checklistTarget = listId
+        checklistRenameNew = renameNew
         checklistOpen = true
     }
     // The other member finished a list while the sheet is closed: say so here.
@@ -441,13 +445,19 @@ fun CalendarScreen(
                             nameOf = nameOf,
                             editorNameOf = { e -> e.editedByUid?.let { calendar.displayName(it, e.editedByName.orEmpty()) } },
                             isMine = { e -> calendar.isMe(e.authorUid) },
-                            checklistFor = { e -> checklists.summaryFor(e.id) },
+                            checklistsFor = { e -> checklists.summariesFor(e.id) },
                             onOpenChecklist = { openChecklist(it) },
                             // The event's list, or a new one named after the event.
-                            onEventChecklist = { event, title ->
-                                val listId = checklists.summaryFor(event.id)?.listId
-                                    ?: checklists.createList(title, eventId = event.id)
-                                listId?.let { openChecklist(it) }
+                            onEventChecklist = { event, title, listId ->
+                                if (listId != null) {
+                                    openChecklist(listId)
+                                } else {
+                                    // A new list named after the event (numbered if the event
+                                    // already has one by that name); its name opens for editing.
+                                    val taken = checklists.summariesFor(event.id).map { it.title }
+                                    checklists.createList(defaultChecklistTitle(title, taken), eventId = event.id)
+                                        ?.let { openChecklist(it, renameNew = true) }
+                                }
                             },
                             initialSelectedDate = focusDate,
                             focusToken = focusToken,
@@ -574,9 +584,11 @@ fun CalendarScreen(
             calendar = calendar,
             today = today,
             initialListId = checklistTarget,
+            renameOnOpen = checklistRenameNew,
             onDismiss = {
                 checklistOpen = false
                 checklistTarget = null
+                checklistRenameNew = false
             }
         )
     }

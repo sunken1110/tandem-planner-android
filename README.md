@@ -65,15 +65,18 @@
 - Kept up to date when events change in the app, hourly in the background (so the other member's new events show up), at midnight, and when one of today's events passes.
 
 ### Shared checklists
-- Lists for anything the two of you keep track of together: groceries, packing for a trip, chores. A list can stand alone or be linked to an event, and the event then shows it as a chip in its day ("☑ 여행 짐 3/8"), which opens the list.
-- From an event: its editor has a "체크리스트 만들기" row, which makes a list named after the event, already linked, and opens it (unsaved edits are saved on the way). Once linked, the row shows the list's progress and opens it.
-- From a list: "일정에 연결" opens a small month calendar with the authors' dots on days with events; tap a day, then one of its events. Past events can be linked too.
+- Lists for anything the two of you keep track of together: groceries, packing for a trip, chores. A list can stand alone or be linked to an event, and the event then shows it as a chip in its day ("☑ 짐 3/8"), which opens the list.
+- From an event: its editor has a "체크리스트 만들기" row, which makes a list named "{event} 체크리스트" (numbered if the event already has one by that name), already linked, and opens it with the name selected for editing (unsaved event edits are saved on the way). Each list already linked gets its own row with its progress.
+- An event can have several lists ("짐", "맛집"): each shows as its own chip, on a single line so event rows keep their height. Lists that don't fit fold into "+N", which opens a small menu (fading and growing in) with every list's full name and progress.
+- Under an event, a list's name leaves out the event's own title ("제주 여행 짐" shows as "☑ 짐 3/8", the default name as "☑ 체크리스트"); other names stay as they are.
+- A list opened from an event (or a message) goes back to the calendar, not to all lists.
+- From a list: "일정에 연결" opens a small month calendar with the authors' dots on days with events; tap a day, then one of its events, whose days are painted as a block, and confirm with "연결". Past events can be linked too.
 - Opened from the round button left of the quick-add bar. Its badge counts the items still unchecked over all lists.
 - Checks sync live between both phones. Each checked item shows who checked it, and rows the other member just changed glow briefly.
 - "민지 보는 중" appears with a breathing dot while the other member has the same list open.
 - Tap to check (the box pops, then the row moves to the checked section), swipe sideways to delete (with "되돌리기"), long-press and drag to reorder. Checked items can be hidden per list.
 - Unchecking the other member's check offers "되돌리기" too, which gives the check back to them.
-- Checking the last item turns the progress bar green, with a short burst of season-colored confetti and a firm haptic. If the other member finishes a list, you get a message ("민지님이 마지막 항목을 체크했어요 · ‘장보기’ 모두 완료").
+- Checking the last item turns the progress bar green, with a short burst shaped by the season (spring petals, summer light bubbles, autumn leaves, winter snowflakes) and a firm haptic. If the other member finishes a list, you get a message ("민지님이 마지막 항목을 체크했어요 · ‘장보기’ 모두 완료").
 
 ### Polish
 - Ambient seasonal particles: petals, light bubbles, falling leaves, snow. They follow the season of the month you open.
