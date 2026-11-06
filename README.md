@@ -23,7 +23,7 @@
   - **Summer** (Jun–Aug): pale sky → clear sky → deep sky blue
   - **Autumn** (Sep–Nov): ginkgo yellow → amber → maple orange
   - **Winter** (Dec–Feb): frost → deep silver → clear silver
-- A progress bar shows the year's full color flow and the number of days passed.
+- A progress bar shows the year's full color flow and the number of days passed. Tapping the count switches to the days left ("55일 남음"): the digits roll over and the bar shows the rest of the year instead; the choice is remembered.
 - On launch, the filled cells sweep in from January 1 to today.
 - **D-day card**: the next event (or a trip under way) with its D-day. The badge deepens as the day approaches (D-8+, D-7…2, D-1, then filled on the day). Tapping it opens that day. With nothing coming up, it shows how many days are left in the season.
 
@@ -58,7 +58,7 @@
 - Parsing is behind an `EventParser` interface; today it is rule-based, and it is designed to be swapped for an AI model.
 
 ### Home-screen widgets
-- Three entries in the widget list, each resizable: **1×1** D-day tile, **2×1** next-event card, **2×2** card with the next two events and a "+" for quick add. Stretched to four columns, the same layouts use longer dates.
+- Three entries in the widget list, each resizable: **1×1** D-day tile, **2×1** next-event card, **2×2** card with the events after it and a "+" for quick add; taller, the list fills the height with more events. Stretched to four columns, the same layouts use longer dates. Times read as in the app at every size ("오후 7:00", "하루 종일"). In the 2-column list, rows show day · dot · title to leave the title room (today's events show their time instead of the day); the 4-column list adds a time column. Events without a time get a hollow dot, and TalkBack reads each row with its full date and time.
 - The 1×1 tile takes the D-day step's color, from a faint tint far away to the author's full color on the day.
 - Per-widget background: the season color (default), see-through over the wallpaper, or your own photo. A slider sets how strong it is. Photos can be moved and zoomed inside a frame of the widget's real shape, stay on the phone, and are cut again after a resize.
 - Tapping an event opens its day; "+" opens the app with the quick-add bar focused.
@@ -67,11 +67,11 @@
 ### Shared checklists
 - Lists for anything the two of you keep track of together: groceries, packing for a trip, chores. A list can stand alone or be linked to an event, and the event then shows it as a chip in its day ("☑ 짐 3/8"), which opens the list.
 - From an event: its editor has a "체크리스트 만들기" row, which makes a list named "{event} 체크리스트" (numbered if the event already has one by that name), already linked, and opens it with the name selected for editing (unsaved event edits are saved on the way). Each list already linked gets its own row with its progress.
-- An event can have several lists ("짐", "맛집"): each shows as its own chip, on a single line so event rows keep their height. Lists that don't fit fold into "+N", which opens a small menu (fading and growing in) with every list's full name and progress.
+- An event can have several lists ("짐", "맛집"): each shows as its own chip, on a single line so event rows keep their height. Lists that don't fit fold into "+N", which opens a small menu (fading and growing in) with every list's full name and progress. Chips and the menu take the season's color while items are left, green once a list is done.
 - Under an event, a list's name leaves out the event's own title ("제주 여행 짐" shows as "☑ 짐 3/8", the default name as "☑ 체크리스트"); other names stay as they are.
 - A list opened from an event (or a message) goes back to the calendar, not to all lists.
 - From a list: "일정에 연결" opens a small month calendar with the authors' dots on days with events; tap a day, then one of its events, whose days are painted as a block, and confirm with "연결". Past events can be linked too.
-- Opened from the round button left of the quick-add bar. Its badge counts the items still unchecked over all lists.
+- Opened from the round button left of the quick-add bar. Its badge counts the lists still to finish (empty lists and lists of events that are over don't count).
 - Checks sync live between both phones. Each checked item shows who checked it, and rows the other member just changed glow briefly.
 - "민지 보는 중" appears with a breathing dot while the other member has the same list open.
 - Tap to check (the box pops, then the row moves to the checked section), swipe sideways to delete (with "되돌리기"), long-press and drag to reorder. Checked items can be hidden per list.

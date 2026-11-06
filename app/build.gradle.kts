@@ -25,8 +25,8 @@ android {
         applicationId = "io.github.sunken1110.tandemplanner"
         minSdk = 31
         targetSdk = 37
-        versionCode = 7
-        versionName = "3.0"
+        versionCode = 8
+        versionName = "3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

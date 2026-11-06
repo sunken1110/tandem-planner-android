@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget card's title (see SteadyTitle in TandemWidget.kt). No font padding and
+  no fallback line spacing: a title that fits and one cut short with "…" are then
+  measured the same way, so Korean titles sit at the same height in every widget size.
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_card_title"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingTop="1dp"
+    android:ellipsize="end"
+    android:fallbackLineSpacing="false"
+    android:fontFamily="sans-serif-medium"
+    android:includeFontPadding="false"
+    android:maxLines="1"
+    android:textSize="14sp" />

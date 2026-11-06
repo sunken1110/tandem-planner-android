@@ -82,14 +82,12 @@
         android:layout_marginBottom="4dp"
         android:background="#F3C98A" />
 
-    <!-- Day · author dot · time (lighter, fixed width) · title, as in the real widget. -->
+    <!-- Day · author dot · title, as in the real 2×2 widget (times only in the card above). -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="22dp"
         android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp">
+        android:orientation="horizontal">
 
         <TextView
             android:layout_width="30dp"
@@ -100,38 +98,29 @@
             android:textSize="11sp"
             android:textStyle="bold" />
 
+        <!-- Hollow: an all-day event. -->
         <FrameLayout
             android:layout_width="6dp"
             android:layout_height="6dp"
-            android:background="@drawable/widget_preview_dot_violet" />
-
-        <TextView
-            android:layout_width="36dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:maxLines="1"
-            android:text="종일"
-            android:textColor="#8C2B2622"
-            android:textSize="11sp" />
+            android:background="@drawable/widget_preview_ring_violet" />
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
             android:layout_weight="1"
             android:maxLines="1"
-            android:text="발렌타인데이"
+            android:text="발렌타인데이 저녁 예약"
             android:textColor="#2B2622"
             android:textSize="11sp" />
     </LinearLayout>
 
-    <!-- Day · author dot · time (lighter, fixed width) · title, as in the real widget. -->
+    <!-- Day · author dot · title, as in the real 2×2 widget (times only in the card above). -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="22dp"
         android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp">
+        android:orientation="horizontal">
 
         <TextView
             android:layout_width="30dp"
@@ -148,20 +137,12 @@
             android:background="@drawable/widget_preview_dot_pink" />
 
         <TextView
-            android:layout_width="36dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:maxLines="1"
-            android:text="19:00"
-            android:textColor="#8C2B2622"
-            android:textSize="11sp" />
-
-        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
             android:layout_weight="1"
             android:maxLines="1"
-            android:text="여행 사진 정리"
+            android:text="여행 사진 정리하기"
             android:textColor="#2B2622"
             android:textSize="11sp" />
     </LinearLayout>

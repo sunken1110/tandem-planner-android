@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
@@ -327,9 +328,19 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
         return ChecklistProgress(list.count { it.done }, list.size)
     }
 
-    /** Unchecked items over all lists (the badge on the checklist button). */
-    val remainingCount: Int
-        get() = lists.sumOf { progressOf(it.id).remaining }
+    /**
+     * Lists still to finish, for the badge on the checklist button: lists with at
+     * least one unchecked item. Empty lists don't count (nothing to do), nor do
+     * lists of events that are over (an old trip's leftovers would keep the badge
+     * up forever); those still show in the list of checklists.
+     */
+    fun openListCount(today: LocalDate): Int {
+        val ended = calendar.events.filter { it.lastDate.isBefore(today) }.mapTo(HashSet()) { it.id }
+        return lists.count { list ->
+            val progress = progressOf(list.id)
+            progress.total > 0 && !progress.complete && list.eventId !in ended
+        }
+    }
 
     /** The checklists linked to [eventId], oldest first, for the event's row in the day list. */
     fun summariesFor(eventId: String): List<ChecklistSummary> =

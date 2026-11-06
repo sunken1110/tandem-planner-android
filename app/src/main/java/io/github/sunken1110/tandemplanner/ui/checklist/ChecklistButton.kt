@@ -43,10 +43,11 @@ private val BUTTON_SIZE = 48.dp
 
 /**
  * Round button left of the quick-add bar that opens the shared checklists.
- * A badge shows how many items are still unchecked over all lists.
+ * A badge shows how many lists are still to finish
+ * ([io.github.sunken1110.tandemplanner.data.SharedChecklists.openListCount]).
  */
 @Composable
-fun ChecklistButton(remaining: Int, season: Season, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ChecklistButton(openLists: Int, season: Season, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(modifier) {
         Surface(
             onClick = onClick,
@@ -56,7 +57,7 @@ fun ChecklistButton(remaining: Int, season: Season, onClick: () -> Unit, modifie
             modifier = Modifier
                 .size(BUTTON_SIZE)
                 .semantics {
-                    contentDescription = if (remaining > 0) "체크리스트, 남은 항목 ${remaining}개" else "체크리스트"
+                    contentDescription = if (openLists > 0) "체크리스트, 남은 리스트 ${openLists}개" else "체크리스트"
                 }
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -64,7 +65,7 @@ fun ChecklistButton(remaining: Int, season: Season, onClick: () -> Unit, modifie
             }
         }
         AnimatedVisibility(
-            visible = remaining > 0,
+            visible = openLists > 0,
             enter = scaleIn(),
             exit = scaleOut(),
             modifier = Modifier
@@ -72,7 +73,7 @@ fun ChecklistButton(remaining: Int, season: Season, onClick: () -> Unit, modifie
                 .offset(x = 4.dp, y = (-2).dp)
         ) {
             Text(
-                if (remaining > 99) "99+" else remaining.toString(),
+                if (openLists > 99) "99+" else openLists.toString(),
                 fontSize = 10.sp,
                 lineHeight = 12.sp,
                 fontWeight = FontWeight.Bold,

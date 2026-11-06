@@ -4,7 +4,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import android.widget.RemoteViews
+import androidx.compose.ui.graphics.toArgb
+import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.Image
+import io.github.sunken1110.tandemplanner.ui.common.periodLabel
+import io.github.sunken1110.tandemplanner.R
+import androidx.glance.semantics.semantics
+import androidx.glance.semantics.contentDescription
+import androidx.glance.ColorFilter
 import androidx.glance.ImageProvider
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.LocalAppWidgetOptions
@@ -15,6 +23,7 @@ import androidx.glance.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -88,16 +97,20 @@ private val NightBase = Color(0xFF1C1B1F)
  * - 1×1: a D-day tile — the whole tile takes the D-day step's color, from a faint
  *   tint (D-8+) to the author's full color (D-DAY), with the number large;
  * - 2×1: the app's D-day card, with short dates ("11/3 ~ 11/6 · 민지");
- * - 2×2: the card, the next two events and a "+" (quick add).
+ * - 2×2: the card, the events after it and a "+" (quick add).
  * Stretched to 4 columns, the same layouts use the long dates of the app
- * ("11월 3일 (화) ~ 6일 (금) · 4일"); taller, the list shows three events.
+ * ("11월 3일 (화) ~ 6일 (금) · 4일"); taller, the list fills the height with more
+ * events (see [listRows]). The widget is drawn for its exact size ([SizeMode.Exact]).
  *
  * The background is a light tint of the current season's color. D-day badges
  * get stronger as the day comes closer (see `DdayStep`), exactly as in the app.
  */
 open class TandemWidget : GlanceAppWidget() {
 
-    override val sizeMode = SizeMode.Responsive(setOf(TILE, CARD, CARD_WIDE, LIST, LIST_WIDE, LIST_TALL))
+    // Drawn for the widget's actual size (not one of a few prepared sizes), so the
+    // list can fill whatever height it's given. After a resize, the widget redraws
+    // once the app has caught up (well under a second).
+    override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // Android's id for this placed widget: its background settings are saved under it.
@@ -140,8 +153,7 @@ open class TandemWidget : GlanceAppWidget() {
         val LIST = DpSize(110.dp, 110.dp)
         /** 4×2: same list, long dates and separate time column. */
         val LIST_WIDE = DpSize(250.dp, 110.dp)
-        /** 3 rows or taller: one more event in the list. */
-        val LIST_TALL = DpSize(110.dp, 180.dp)
+
     }
 }
 
@@ -209,6 +221,10 @@ private fun fixed(color: Color) = ColorProvider(day = color, night = color)
 private class WidgetColors(season: Season, style: WidgetStyle) {
     private val light = style.lightText
     val text = if (light) fixed(Color.White) else ColorProvider(day = Color(0xFF2B2622), night = Color(0xFFF3EFEA))
+
+    /** [text] as plain colors, for the title view drawn outside Glance ([SteadyTitle]). */
+    val textDay: Color = if (light) Color.White else Color(0xFF2B2622)
+    val textNight: Color = if (light) Color.White else Color(0xFFF3EFEA)
     val subtext = if (light) fixed(Color(0xD9FFFFFF)) else ColorProvider(day = Color(0xB32B2622), night = Color(0xB3F3EFEA))
     /** Lighter still: the times in the list, so they read apart from the titles. */
     val muted = if (light) fixed(Color(0xB3FFFFFF)) else ColorProvider(day = Color(0x8C2B2622), night = Color(0x8CF3EFEA))
@@ -310,8 +326,26 @@ private fun WidgetContent(state: WidgetState, style: WidgetStyle, photo: Bitmap?
                 Spacer(GlanceModifier.height(8.dp))
                 Box(GlanceModifier.fillMaxWidth().height(1.dp).background(colors.divider)) {}
                 Spacer(GlanceModifier.height(4.dp))
-                val rows = if (size.height >= TandemWidget.LIST_TALL.height) 3 else 2
-                upcoming.drop(1).take(rows).forEach { UpcomingRow(it, today, wide, colors) }
+                val scale = LocalContext.current.resources.configuration.fontScale.coerceAtLeast(1f)
+                val shown = upcoming.drop(1).take(listRows(size.height, scale))
+                // Rows only where they fit: a very short widget shows the card and "+".
+                // One day-column width for every row, so the dots and titles line up:
+                // wider when any row shows today's time in it (narrow widgets only).
+                val dayWidth = when {
+                    wide -> 44.dp
+                    shown.any { showsTimeAsDay(it.event, today) } -> TIME_COLUMN_NARROW
+                    else -> 30.dp
+                }
+                // Glance keeps at most 10 children in one Column and silently drops the
+                // rest, so the rows go in their own Column (in groups of 10); otherwise
+                // the "+" below fell off once the list grew past a few rows.
+                Column(GlanceModifier.fillMaxWidth()) {
+                    shown.chunked(GLANCE_MAX_CHILDREN).forEach { group ->
+                        Column(GlanceModifier.fillMaxWidth()) {
+                            group.forEach { UpcomingRow(it, today, wide, dayWidth, colors) }
+                        }
+                    }
+                }
                 Spacer(GlanceModifier.defaultWeight())
                 Row(GlanceModifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                     PlusButton(colors)
@@ -399,17 +433,23 @@ private fun Card(item: WidgetItem, today: LocalDate, wide: Boolean, colors: Widg
     val e = item.event
     val ongoing = e.isMultiDay && e.date.isBefore(today)
     val whenText = if (wide) eventWhenText(e, today) else shortWhen(e, today)
+    // Each line sits at the top of a slot of fixed height (grown with the system
+    // font size), so the lines sit at the same place in every widget size; the
+    // title is drawn by SteadyTitle so it does too, whether it fits or is cut short.
+    val scale = LocalContext.current.resources.configuration.fontScale.coerceAtLeast(1f)
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(GlanceModifier.width(3.dp).height(42.dp).background(fixed(item.color)).cornerRadius(2.dp)) {}
+        Box(GlanceModifier.width(3.dp).height(42.dp * scale).background(fixed(item.color)).cornerRadius(2.dp)) {}
         Spacer(GlanceModifier.width(8.dp))
         Column(GlanceModifier.defaultWeight()) {
-            Text(
-                if (ongoing) "진행 중인 일정" else "다음 일정",
-                style = textStyle(colors.subtext, 11.sp),
-                maxLines = 1
-            )
-            Text(e.title, style = textStyle(colors.text, 14.sp, FontWeight.Medium), maxLines = 1)
-            Text("$whenText · ${item.author}", style = textStyle(colors.subtext, 11.sp), maxLines = 1)
+            CardLine(SMALL_LINE * scale) {
+                Text(if (ongoing) "진행 중인 일정" else "다음 일정", style = textStyle(colors.subtext, 11.sp), maxLines = 1)
+            }
+            CardLine(TITLE_LINE * scale) {
+                SteadyTitle(e.title, colors)
+            }
+            CardLine(SMALL_LINE * scale) {
+                Text("$whenText · ${item.author}", style = textStyle(colors.subtext, 11.sp), maxLines = 1)
+            }
         }
         Spacer(GlanceModifier.width(6.dp))
         Badge(item, today, small = !wide)
@@ -417,51 +457,125 @@ private fun Card(item: WidgetItem, today: LocalDate, wide: Boolean, colors: Widg
 }
 
 /**
- * One line of the list: day · author dot · time · title. Opens that day.
- * The time is in the lighter text color and has a fixed-width column, so it
- * reads apart from the title and the titles line up. Narrow widgets use short
- * times ("종일", "19:00", "~2/12"); wide ones the app's ("하루 종일", "오후 7:00").
+ * One line of the list. Opens that day.
+ *
+ * - Wide widgets (4 columns): day · author dot · time · title. The time is in the
+ *   lighter text color in a fixed-width column, so the titles line up.
+ * - Narrow ones (2 columns): day · author dot · title, leaving the title room;
+ *   the next event's time is already in the card above. Today's events show
+ *   their time in place of the day ("오후 3:00 ● 치과"), since that's what
+ *   matters today; then every row's day column widens ([dayWidth]) so the dots
+ *   and titles still line up.
+ *
+ * Times read as in the app ("오후 7:00", "하루 종일"); multi-day events show
+ * "~2/12". Events without a time (all day, or several days) get a hollow dot,
+ * so they stand apart without using any width. TalkBack reads the whole row
+ * with its full date and time, also where the time isn't shown.
  */
 @Composable
-private fun UpcomingRow(item: WidgetItem, today: LocalDate, wide: Boolean, colors: WidgetColors) {
+private fun UpcomingRow(item: WidgetItem, today: LocalDate, wide: Boolean, dayWidth: Dp, colors: WidgetColors) {
     val e = item.event
     val ongoing = e.isMultiDay && e.date.isBefore(today)
+    val timed = !e.isMultiDay && e.time.isNotBlank()
+    // Narrow: today's timed events show the time where the day would be.
+    val timeAsDay = !wide && showsTimeAsDay(e, today)
     val day = when {
+        timeAsDay -> displayTime(e.time)
         ongoing -> "진행"
         e.date == today -> "오늘"
         e.date == today.plusDays(1) -> "내일"
         else -> "${e.date.monthValue}/${e.date.dayOfMonth}"
     }
-    val time = when {
-        e.isMultiDay -> "~${e.lastDate.monthValue}/${e.lastDate.dayOfMonth}"
-        e.time.isBlank() -> if (wide) "하루 종일" else "종일"
-        wide -> displayTime(e.time)
-        else -> clock(e.time)
-    }
+    // A fixed height (grown with the system font size), so rows sit at the same
+    // place in every widget size even though wide ones use a larger font.
+    val fontScale = LocalContext.current.resources.configuration.fontScale
     Row(
         GlanceModifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .clickable(openApp(maxOf(e.date, today))),
+            .height(ROW_HEIGHT * fontScale.coerceAtLeast(1f))
+            .clickable(openApp(maxOf(e.date, today)))
+            .semantics { contentDescription = rowDescription(item, today) },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             day,
-            modifier = GlanceModifier.width(if (wide) 44.dp else 30.dp),
+            modifier = GlanceModifier.width(dayWidth),
             style = textStyle(colors.text, 11.sp, FontWeight.Medium),
             maxLines = 1
         )
-        Box(GlanceModifier.size(6.dp).background(fixed(item.color)).cornerRadius(3.dp)) {}
+        AuthorDot(item, hollow = !timed)
         Spacer(GlanceModifier.width(6.dp))
         val size = if (wide) 12.sp else 11.sp
-        Text(
-            time,
-            modifier = GlanceModifier.width(if (wide) 72.dp else 36.dp),
-            style = textStyle(colors.muted, size),
-            maxLines = 1
-        )
+        if (wide) {
+            Text(
+                when {
+                    e.isMultiDay -> "~${e.lastDate.monthValue}/${e.lastDate.dayOfMonth}"
+                    e.time.isBlank() -> "하루 종일"
+                    else -> displayTime(e.time)
+                },
+                // Wide enough for "오후 12:30" and "하루 종일".
+                modifier = GlanceModifier.width(72.dp),
+                style = textStyle(colors.muted, size),
+                maxLines = 1
+            )
+        }
         Text(e.title, modifier = GlanceModifier.defaultWeight(), style = textStyle(colors.text, size), maxLines = 1)
     }
+}
+
+/** Today's timed event: a narrow list writes its time where the day would go. */
+private fun showsTimeAsDay(e: Event, today: LocalDate): Boolean =
+    !e.isMultiDay && e.time.isNotBlank() && e.date == today
+
+/**
+ * How many list rows fit under the card in a widget [height] tall (its actual
+ * height), at the system font [scale]: the height minus padding, the card, the
+ * divider, the "+" button and [SAFETY_MARGIN], divided by a row's height.
+ * Depends on the height only, so widgets of the same height show the same
+ * number of events.
+ */
+private fun listRows(height: Dp, scale: Float): Int {
+    val fixed = 20.dp + (SMALL_LINE * 2 + TITLE_LINE) * scale + 13.dp + 28.dp + SAFETY_MARGIN
+    return ((height - fixed) / (ROW_HEIGHT * scale)).toInt().coerceAtLeast(0)
+}
+
+/**
+ * Kept free when counting rows. Launchers don't always report a widget's size
+ * exactly; if one reports a little more than it shows, a row too many would
+ * push the "+" out of sight. Better one row less than no "+".
+ */
+private val SAFETY_MARGIN = 8.dp
+
+/** Most children Glance keeps in one Row, Column or Box (the rest are dropped). */
+private const val GLANCE_MAX_CHILDREN = 10
+
+/** The author's color dot; [hollow] (a ring) for events without a time. */
+@Composable
+private fun AuthorDot(item: WidgetItem, hollow: Boolean) {
+    if (hollow) {
+        Image(
+            provider = ImageProvider(R.drawable.widget_dot_ring),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(fixed(item.color)),
+            modifier = GlanceModifier.size(6.dp)
+        )
+    } else {
+        Box(GlanceModifier.size(6.dp).background(fixed(item.color)).cornerRadius(3.dp)) {}
+    }
+}
+
+/** What TalkBack reads for a list row: "2월 14일 (토) 오후 3:00, 발렌타인데이, 하윤". */
+private fun rowDescription(item: WidgetItem, today: LocalDate): String {
+    val e = item.event
+    val whenText = when {
+        e.isMultiDay -> periodLabel(e.date, e.lastDate, weekdays = true) +
+            if (e.date.isBefore(today)) " 진행 중" else ""
+        else -> {
+            val date = "${e.date.monthValue}월 ${e.date.dayOfMonth}일 (${e.date.dayOfWeek.koreanShort()})"
+            "$date " + if (e.time.isBlank()) "하루 종일" else displayTime(e.time)
+        }
+    }
+    return "$whenText, ${e.title}, ${item.author}"
 }
 
 /** The D-day pill, with the app's stepped colors in light and dark mode. */
@@ -512,22 +626,71 @@ private fun openApp(date: LocalDate?): Action =
     else actionStartActivity<MainActivity>(actionParametersOf(DateKey to date.toString()))
 
 /**
- * Short "when" for narrow widgets: "11/3 ~ 11/6", "2/4일째 · ~11/6" during a
- * trip, "오늘 19:00", "내일", "11/5 (목) 14:00".
+ * Short "when" for narrow widgets: "11/3 ~ 11/6", "11/3 ~ 11/6 · 2/4일째" during a
+ * trip, "오늘 · 오후 7:00", "내일 · 하루 종일", "11/5 (목) · 오후 2:00" (separated
+ * like the wide card's).
  */
 private fun shortWhen(e: Event, today: LocalDate): String {
     if (e.isMultiDay) {
-        val end = "${e.lastDate.monthValue}/${e.lastDate.dayOfMonth}"
-        return if (e.date.isBefore(today)) "${ChronoUnit.DAYS.between(e.date, today) + 1}/${e.dayCount}일째 · ~$end"
-        else "${e.date.monthValue}/${e.date.dayOfMonth} ~ $end"
+        // Period first, then how far along, like the wide card's "11월 3일 ~ 6일 · 2/4일째".
+        val period = "${e.date.monthValue}/${e.date.dayOfMonth} ~ ${e.lastDate.monthValue}/${e.lastDate.dayOfMonth}"
+        return if (e.date.isBefore(today)) "$period · ${ChronoUnit.DAYS.between(e.date, today) + 1}/${e.dayCount}일째"
+        else period
     }
     val day = when (e.date) {
         today -> "오늘"
         today.plusDays(1) -> "내일"
         else -> "${e.date.monthValue}/${e.date.dayOfMonth} (${e.date.dayOfWeek.koreanShort()})"
     }
-    return if (e.time.isBlank()) day else "$day ${clock(e.time)}"
+    return "$day · " + if (e.time.isBlank()) "하루 종일" else displayTime(e.time)
 }
 
-/** A stored "HH:mm" as is ("19:00"); a free-form legacy time is shown unchanged. */
-private fun clock(stored: String): String = stored.trim()
+/** One line of the card: [content] pinned to the top of a slot [height] tall. */
+@Composable
+private fun CardLine(height: Dp, content: @Composable () -> Unit) {
+    Box(GlanceModifier.fillMaxWidth().height(height), contentAlignment = Alignment.TopStart) {
+        content()
+    }
+}
+
+/**
+ * Card line heights at the normal font size: 11sp lines (room for Korean text
+ * cut short with "…", which lays out a little taller) and the 14sp title.
+ */
+private val SMALL_LINE = 16.dp
+private val TITLE_LINE = 19.dp
+
+/**
+ * The card's title, drawn with a plain Android TextView instead of Glance's Text.
+ *
+ * A one-line TextView lays text out one way when it fits and another way when it
+ * is cut short with "…", and the two put Korean text (drawn with a taller
+ * fallback font) at slightly different heights: the same title sat ~1.5dp lower
+ * in a wide widget, where it fit, than in a narrow one, where it was cut. Glance
+ * can't change how the TextView measures lines, so this view turns off the font
+ * padding and the fallback line spacing (`res/layout/widget_card_title.xml`):
+ * both ways then use the same font measurements and the title stays put.
+ */
+@Composable
+private fun SteadyTitle(text: String, colors: WidgetColors) {
+    val context = LocalContext.current
+    val views = RemoteViews(context.packageName, R.layout.widget_card_title).apply {
+        setTextViewText(R.id.widget_card_title, text)
+        // Day and night colors, so the text follows the theme like Glance's own.
+        setColorInt(R.id.widget_card_title, "setTextColor", colors.textDay.toArgb(), colors.textNight.toArgb())
+    }
+    AndroidRemoteViews(views, GlanceModifier.fillMaxWidth())
+}
+
+
+/**
+ * Height of a list row at the normal font size: the 12sp text of wide widgets
+ * plus a little air. Every size uses it, so the rows line up across sizes.
+ */
+private val ROW_HEIGHT = 22.dp
+
+/**
+ * Day column of a narrow-list row that shows today's time instead
+ * ("오후 12:30" at most), written as in the app.
+ */
+private val TIME_COLUMN_NARROW = 56.dp

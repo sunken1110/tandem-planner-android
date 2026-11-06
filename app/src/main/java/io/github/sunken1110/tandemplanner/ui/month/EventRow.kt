@@ -8,8 +8,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -157,7 +159,7 @@ fun EventRow(
             }
             if (checklists.isNotEmpty()) {
                 Spacer(Modifier.height(5.dp))
-                ChecklistChips(checklists, event.title, onChecklistClick)
+                ChecklistChips(checklists, event.title, accent, onChecklistClick)
             }
         }
         TextButton(onClick = onDelete) { Text("삭제") }
@@ -173,9 +175,17 @@ private val CHIP_GAP = 4.dp
  * "+N", the first one's name is shortened. Tapping "+N" opens a small menu of all
  * the event's lists ([MoreChip]). A chip is never wider than the line, and only
  * its name is shortened ("…"), never its progress.
+ *
+ * Colors follow progress, like the list's own progress bar: the season's color
+ * ([accent], the row's stripe) while items are left, green once a list is done.
  */
 @Composable
-private fun ChecklistChips(summaries: List<ChecklistSummary>, eventTitle: String, onClick: (listId: String) -> Unit) {
+private fun ChecklistChips(
+    summaries: List<ChecklistSummary>,
+    eventTitle: String,
+    accent: Color,
+    onClick: (listId: String) -> Unit
+) {
     val count = summaries.size
     // A plain Layout (not SubcomposeLayout), because the event row asks for its
     // content's height first (IntrinsicSize.Min), which SubcomposeLayout can't answer.
@@ -185,13 +195,13 @@ private fun ChecklistChips(summaries: List<ChecklistSummary>, eventTitle: String
     //   count + n           "+n", for n in 1 until count
     Layout(content = {
         summaries.forEach { summary ->
-            ChecklistChip(summary, eventTitle, onClick = { onClick(summary.listId) })
+            ChecklistChip(summary, eventTitle, accent, onClick = { onClick(summary.listId) })
         }
         if (count > 0) {
-            ChecklistChip(summaries[0], eventTitle, onClick = { onClick(summaries[0].listId) })
+            ChecklistChip(summaries[0], eventTitle, accent, onClick = { onClick(summaries[0].listId) })
         }
         for (hidden in 1 until count) {
-            MoreChip(hidden, summaries, eventTitle, onOpen = onClick)
+            MoreChip(hidden, summaries, eventTitle, accent, onOpen = onClick)
         }
     }) { measurables, constraints ->
         val maxWidth = constraints.maxWidth
@@ -255,6 +265,18 @@ private fun ChecklistChips(summaries: List<ChecklistSummary>, eventTitle: String
     }
 }
 
+/**
+ * A light background in [tone] and readable text on it: the tone darkened in
+ * light mode, lightened in dark mode (so silver winter and yellow summer still read).
+ */
+@Composable
+private fun tintColors(tone: Color): Pair<Color, Color> =
+    if (isSystemInDarkTheme()) {
+        tone.copy(alpha = 0.24f) to lerp(tone, Color.White, 0.45f)
+    } else {
+        tone.copy(alpha = 0.18f) to lerp(tone, Color.Black, 0.45f)
+    }
+
 /** How long the "+N" menu takes to appear, and to go away. */
 private const val MENU_IN_MS = 180
 private const val MENU_OUT_MS = 120
@@ -265,16 +287,21 @@ private const val MENU_OUT_MS = 120
  * and a thin bar. Picking one opens it; tapping outside or "back" closes the menu.
  *
  * The menu grows out of the chip and fades in, and fades out a little faster
- * when closing (only fading when the system's animations are off).
+ * when closing (only fading when the system's animations are off). It has no
+ * shadow: while fading, the menu is drawn in a see-through layer that leaves
+ * shadows out, so one would pop in only at the end. A thin outline and a light
+ * tint mark its edge instead.
  */
 @Composable
 private fun MoreChip(
     hidden: Int,
     summaries: List<ChecklistSummary>,
     eventTitle: String,
+    accent: Color,
     onOpen: (listId: String) -> Unit
 ) {
     val haptics = rememberHaptics()
+    val (background, text) = tintColors(accent)
     val reduceMotion = rememberReduceMotion()
     // Stays composed while the closing animation runs.
     val menu = remember { MutableTransitionState(false) }
@@ -283,11 +310,11 @@ private fun MoreChip(
             "+$hidden",
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = text,
             maxLines = 1,
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
+                .background(background)
                 .clickable(onClickLabel = "체크리스트 모두 보기") {
                     haptics.tap()
                     menu.targetState = true
@@ -314,7 +341,7 @@ private fun MoreChip(
                             scaleOut(tween(MENU_OUT_MS), targetScale = 0.96f, transformOrigin = origin)
                     }
                 ) {
-                    ChecklistMenu(summaries, eventTitle, onPick = { listId ->
+                    ChecklistMenu(summaries, eventTitle, accent, onPick = { listId ->
                         menu.targetState = false
                         onOpen(listId)
                     })
@@ -326,11 +353,21 @@ private fun MoreChip(
 
 /** The "+N" menu's card: "제주 여행 · 리스트 3개", then one row per list. */
 @Composable
-private fun ChecklistMenu(summaries: List<ChecklistSummary>, eventTitle: String, onPick: (listId: String) -> Unit) {
+private fun ChecklistMenu(
+    summaries: List<ChecklistSummary>,
+    eventTitle: String,
+    accent: Color,
+    onPick: (listId: String) -> Unit
+) {
+    val dark = isSystemInDarkTheme()
+    val surface = MaterialTheme.colorScheme.surface
+    // Opaque (a see-through popup would show the list behind it).
+    val card = lerp(surface, accent, if (dark) 0.14f else 0.07f)
+    val header = tintColors(accent).second
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 8.dp,
+        color = card,
+        border = BorderStroke(0.5.dp, accent.copy(alpha = 0.45f)),
         modifier = Modifier.width(260.dp)
     ) {
         Column(
@@ -342,14 +379,15 @@ private fun ChecklistMenu(summaries: List<ChecklistSummary>, eventTitle: String,
             Text(
                 "${eventTitle.trim()} · 리스트 ${summaries.size}개",
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = header,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 2.dp)
             )
             summaries.forEach { summary ->
                 val complete = summary.progress.complete
-                val tint = if (complete) CompleteGreen else MaterialTheme.colorScheme.primary
+                val tone = if (complete) CompleteGreen else accent
+                val (track, text) = tintColors(tone)
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -361,7 +399,7 @@ private fun ChecklistMenu(summaries: List<ChecklistSummary>, eventTitle: String,
                         Text(
                             (if (complete) "✓ " else "☑ ") + checklistLabel(summary.title, eventTitle),
                             fontSize = 14.sp,
-                            color = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurface,
+                            color = if (complete) text else MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -371,7 +409,7 @@ private fun ChecklistMenu(summaries: List<ChecklistSummary>, eventTitle: String,
                             if (complete) "모두 완료" else "${summary.progress.done}/${summary.progress.total}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = text
                         )
                     }
                     Spacer(Modifier.height(6.dp))
@@ -380,14 +418,14 @@ private fun ChecklistMenu(summaries: List<ChecklistSummary>, eventTitle: String,
                             .fillMaxWidth()
                             .height(4.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                            .background(track)
                     ) {
                         Box(
                             Modifier
                                 .fillMaxWidth(summary.progress.fraction)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(50))
-                                .background(tint)
+                                .background(tone)
                         )
                     }
                 }
@@ -418,19 +456,19 @@ private class BelowAnchor(private val gap: Int, private val margin: Int) : Popup
 }
 
 /**
- * "☑ 짐 3/8", or "✓ 짐 · 모두 완료" in green once everything is checked. The
+ * "☑ 짐 3/8" in the season's color, or "✓ 짐 · 모두 완료" in green once everything is checked. The
  * event's own title is left out of the name ([checklistLabel]), since the chip
  * sits right under it. When space is short only the name is shortened.
  */
 @Composable
-private fun ChecklistChip(summary: ChecklistSummary, eventTitle: String, onClick: () -> Unit) {
+private fun ChecklistChip(summary: ChecklistSummary, eventTitle: String, accent: Color, onClick: () -> Unit) {
     val complete = summary.progress.complete
-    val tint = if (complete) CompleteGreen else MaterialTheme.colorScheme.onSurfaceVariant
+    val (background, tint) = tintColors(if (complete) CompleteGreen else accent)
     val name = checklistLabel(summary.title, eventTitle)
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(tint.copy(alpha = 0.12f))
+            .background(background)
             .clickable(onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically

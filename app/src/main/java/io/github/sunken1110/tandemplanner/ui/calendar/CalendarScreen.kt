@@ -486,7 +486,7 @@ fun CalendarScreen(
             focusRequest = quickAddFocus,
             leading = {
                 ChecklistButton(
-                    remaining = checklists.remainingCount,
+                    openLists = checklists.openListCount(today),
                     season = season,
                     onClick = {
                         haptics.tap()
