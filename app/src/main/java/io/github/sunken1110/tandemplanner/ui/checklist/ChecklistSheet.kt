@@ -93,6 +93,7 @@ import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
 import io.github.sunken1110.tandemplanner.ui.common.ddayText
 import io.github.sunken1110.tandemplanner.ui.common.displayTime
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import io.github.sunken1110.tandemplanner.ui.common.periodLabel
 import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaders
 import io.github.sunken1110.tandemplanner.ui.common.weekdayHeaderColor
@@ -618,10 +619,7 @@ private fun LinkEventDialog(
             Column {
                 // ── Month ──
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = { showMonth(month.minusMonths(1)) },
-                        modifier = Modifier.semantics { contentDescription = "이전 달" }
-                    ) { Text("‹", fontSize = 20.sp, modifier = Modifier.clearAndSetSemantics {}) }
+                    GlyphButton("‹", "이전 달", onClick = { showMonth(month.minusMonths(1)) })
                     Text(
                         "${month.year}년 ${month.monthValue}월",
                         fontSize = 15.sp,
@@ -629,10 +627,7 @@ private fun LinkEventDialog(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(
-                        onClick = { showMonth(month.plusMonths(1)) },
-                        modifier = Modifier.semantics { contentDescription = "다음 달" }
-                    ) { Text("›", fontSize = 20.sp, modifier = Modifier.clearAndSetSemantics {}) }
+                    GlyphButton("›", "다음 달", onClick = { showMonth(month.plusMonths(1)) })
                 }
                 Row {
                     WeekdayHeaders.forEachIndexed { column, label ->

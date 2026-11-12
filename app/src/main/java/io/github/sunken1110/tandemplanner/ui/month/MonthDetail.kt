@@ -1,6 +1,7 @@
 package io.github.sunken1110.tandemplanner.ui.month
 
 import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.Animatable as ColorAnimatable
@@ -399,7 +400,13 @@ fun MonthDetail(
                 },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹ ${yearMonth.year}년") }
+            // The button's own text size (Unspecified), as before; read without the "‹".
+            GlyphButton(
+                "‹ ${yearMonth.year}년",
+                "${yearMonth.year}년 달력으로",
+                onClick = { haptics.tap(); onBack() },
+                fontSize = TextUnit.Unspecified
+            )
             Spacer(Modifier.weight(1f))
             GlyphButton("‹", "이전 달", onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1)
             Text("${yearMonth.monthValue}월", fontSize = 20.sp, fontWeight = FontWeight.Medium)

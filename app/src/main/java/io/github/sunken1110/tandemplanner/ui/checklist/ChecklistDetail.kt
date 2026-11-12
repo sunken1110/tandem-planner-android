@@ -43,8 +43,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.CoroutineScope
 import io.github.sunken1110.tandemplanner.data.progress
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
@@ -101,6 +99,7 @@ import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
 import kotlinx.coroutines.delay
@@ -327,10 +326,7 @@ internal fun ChecklistDetail(
                 .padding(start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(
-                onClick = { haptics.tap(); onBack() },
-                modifier = Modifier.semantics { contentDescription = "뒤로" }
-            ) { Text("‹", fontSize = 22.sp, modifier = Modifier.clearAndSetSemantics {}) }
+            GlyphButton("‹", "뒤로", onClick = { haptics.tap(); onBack() }, fontSize = 22.sp)
             if (renaming) {
                 NameField(
                     initial = list.title,
@@ -354,10 +350,7 @@ internal fun ChecklistDetail(
             ViewingNow(checklists, calendar, list.id, reduceMotion, Modifier.padding(start = 6.dp))
             Box {
                 var menu by remember { mutableStateOf(false) }
-                TextButton(
-                    onClick = { haptics.tap(); menu = true },
-                    modifier = Modifier.semantics { contentDescription = "더보기" }
-                ) { Text("⋮", fontSize = 20.sp, modifier = Modifier.clearAndSetSemantics {}) }
+                GlyphButton("⋮", "더보기", onClick = { haptics.tap(); menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("이름 바꾸기") }, onClick = { menu = false; onRename() })
                     DropdownMenuItem(
