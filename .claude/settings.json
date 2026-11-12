@@ -4,22 +4,17 @@
       "Read(./local.properties)",
       "Read(./**/*.jks)",
       "Read(./**/*.keystore)",
-      "Bash(./gradlew.bat installDebug:*)",
-      "Bash(./gradlew.bat install:*)",
-      "Bash(./gradlew.bat connectedAndroidTest:*)",
-      "Bash(./gradlew installDebug:*)",
-      "Bash(./gradlew connectedAndroidTest:*)",
-      "Bash(adb install:*)",
-      "Bash(adb install-multiple:*)",
-      "Bash(adb shell am start:*)",
-      "Bash(adb shell pm install:*)",
-      "PowerShell(./gradlew.bat installDebug:*)",
-      "PowerShell(.\\gradlew.bat installDebug:*)",
-      "PowerShell(./gradlew.bat connectedAndroidTest:*)",
-      "PowerShell(.\\gradlew.bat connectedAndroidTest:*)",
-      "PowerShell(adb install:*)",
-      "PowerShell(adb shell am start:*)",
-      "PowerShell(adb shell pm install:*)"
+      "Read(./**/google-services.json)",
+      "Bash(*gradlew*install*)",
+      "Bash(*gradlew*connected*)",
+      "Bash(*adb *install*)",
+      "Bash(*adb *am start*)",
+      "Bash(*adb *monkey*)",
+      "PowerShell(*gradlew*install*)",
+      "PowerShell(*gradlew*connected*)",
+      "PowerShell(*adb *install*)",
+      "PowerShell(*adb *am start*)",
+      "PowerShell(*adb *monkey*)"
     ]
   }
 }

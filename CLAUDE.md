@@ -25,7 +25,7 @@ There are no test sources yet (`app/src/test` and `app/src/androidTest` don't ex
 
 ## Device installs
 
-- Never install or launch the app on a phone or emulator: no `installDebug`, `connectedAndroidTest`, `adb install`, `adb shell am start` or similar. These are also denied in `.claude/settings.json`.
+- Never install or launch the app on a phone or emulator: no `installDebug`, `connectedAndroidTest`, `adb install`, `adb shell am start` or similar. `.claude/settings.json` denies the common forms as a backstop, but it can't catch every variant: this rule is the main control.
 - Why: `installDebug` installs into every user profile on the device, including Dual Apps and Secure Folder.
 - The user installs with **Run** in Android Studio. Claude stops after the build and tells the user: "Android Studio의 Run으로 확인해 주세요."
 
@@ -94,12 +94,12 @@ Reasons and history: `docs/handoff.md`, section 4.
   - **How to test**: steps the user can follow (build, then what to check with Run in Android Studio).
   - **Notes**: risks, follow-ups, `firestore.rules` or Firestore field changes, new files. Write "None" if empty.
 - After opening a PR, verify it with the `pr-reviewer` subagent (`.claude/agents/pr-reviewer.md`).
-- Explain the review result to the user in **Korean** first. Only after the user confirms, post the reviewer's English report to the PR with `gh pr comment <number> --body-file <file>`.
+- Explain the review result to the user in **Korean** first. Only after the user confirms, post the reviewer's English report to the PR with `gh pr comment <number> --body-file <file>`. Write that file (and any PR body file) outside the repository, e.g. in the session scratchpad or a temp directory, so it is never committed.
 
 ## Security
 
 - Never request, accept or create `local.properties` (it holds signing passwords) or keystore files (`*.jks`, `*.keystore`). Never read them either (also denied in `.claude/settings.json`).
 - If the user is about to send one by mistake, stop them.
-- `google-services.json` is not needed for any task.
+- `google-services.json` is not needed for any task. Don't read it (also denied in `.claude/settings.json`).
 
 Line endings are LF (`.gitattributes`), except `*.bat`/`*.cmd` (CRLF).
