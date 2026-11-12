@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
@@ -147,8 +148,11 @@ fun EventEditorSheet(
     }
     // Which date's month grid is open; at most one at a time.
     var picking by remember { mutableStateOf<DatePart?>(null) }
+    val focusManager = LocalFocusManager.current
     fun togglePicker(part: DatePart) {
         picking = if (picking == part) null else part
+        // Drop the title's focus (and the keyboard) so the grid isn't hidden under it.
+        if (picking != null) focusManager.clearFocus()
     }
     // The last-day grid has nothing to edit once the event is a single day again.
     LaunchedEffect(multiDay) { if (!multiDay && picking == DatePart.END) picking = null }
