@@ -74,7 +74,7 @@ Reasons and history: `docs/handoff.md`, section 4.
 
 ## Git
 
-- Never commit or push to `main` directly. Work on a `feature/…` branch.
+- Never commit or push to `main` directly. Work on a branch named `<type>/<short-kebab-case-description>`, where `<type>` is one of `feature`, `fix`, `refactor`, `review`, `docs`, `chore`.
 - Claude pushes the branch and opens the PR. The user merges it.
 - Never merge a PR (no `gh pr merge`).
 - Never use `git push --no-verify` or force push.
