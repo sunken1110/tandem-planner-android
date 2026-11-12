@@ -44,7 +44,7 @@
 - **Public holidays** (incl. substitute holidays and election days) show a red day number and a short name. Weekend day numbers are always colored (Sunday red, Saturday sky blue).
 - **Multi-day events** (vacations, trips) are all-day and drawn as continuous bands across the grid, continuing on the next row at the end of a week. The day list shows "11월 3일 ~ 6일 · 2/4일째".
 - Tap a day to see and add its events in a bottom-sheet editor. The page scrolls once so the whole list is visible.
-- Tap an event to edit its date, period, time or title in the same sheet; it keeps its original author. When the other member edits it, the row notes who did and what the author originally wrote (e.g. "민지가 수정함 · 원래 오후 7:00"). Repeated edits keep pointing at the author's version. The note disappears when the author edits the event, or when it's changed back to the original.
+- Tap an event to edit its date, period, time or title in the same sheet; it keeps its original author. ‹ › move a date by one day; tapping the date opens a month grid right below it to pick any day (the last day of a multi-day event too), and after saving the month view follows the event to its day. When the other member edits it, the row notes who did and what the author originally wrote (e.g. "민지가 수정함 · 원래 오후 7:00"). Repeated edits keep pointing at the author's version. The note disappears when the author edits the event, or when it's changed back to the original.
 - Deleting asks for confirmation first, with the event's date, time and title (and the whole period for a multi-day event).
 - **Time without typing**: "시간 없음 / 시간 지정" toggle, then iOS-style 오전/오후, hour and minute wheels (5-minute steps; 오전/오후 also flips on tap) with a haptic tick per step. Wheels are cyclic, rows can be tapped, and the hour wheel walks through the whole day (오전 11 → 오후 12 switches 오전/오후 on its own).
 - **Time recall**: while you type a title, the sheet suggests the time of past events with the same or a similar title (e.g. "필라테스" → 오후 8:00), shown as a small "과거 이력 기반 추천" hint. It stays quiet when past times disagree.
@@ -153,7 +153,7 @@ app/src/main/java/io/github/sunken1110/tandemplanner/
 └─ ui/
     ├─ theme/               # Material theme + calendar/member colors
     ├─ common/              # DayCell, MonthGrid, EventMarks (chips, D-day badge), WheelPicker, YearPaint, GlyphButton, time/member helpers
-    ├─ editor/              # Event editor bottom sheet, time wheel
+    ├─ editor/              # Event editor bottom sheet, time wheel, inline date picker
     ├─ quickadd/            # Floating natural-language input with live preview
     ├─ checklist/           # Checklist button, sheet (all lists / one list), rows, celebration
     ├─ effects/             # Seasonal particles, intro overlay, haptics, reduce-motion check

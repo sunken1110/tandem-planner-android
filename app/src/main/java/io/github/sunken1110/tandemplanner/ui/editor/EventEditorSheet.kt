@@ -439,7 +439,15 @@ private fun DateLabel(text: String, color: Color, open: Boolean, onClick: () -> 
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = color, textAlign = TextAlign.Center)
+        Text(
+            text,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = color,
+            textAlign = TextAlign.Center,
+            // Measured after the ▾, so a long label wraps instead of squeezing the hint out.
+            modifier = Modifier.weight(1f, fill = false)
+        )
         Text(
             if (open) " ▴" else " ▾",
             fontSize = 12.sp,

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,9 @@ fun InlineDatePicker(
     val haptics = rememberHaptics()
     val reduceMotion = rememberReduceMotion()
     var month by remember { mutableStateOf(YearMonth.from(selected)) }
+    // Follow the selection when it moves into another month from outside the grid
+    // (the sheet's ‹ › stepper), so the selected day never drops out of view.
+    LaunchedEffect(selected) { month = YearMonth.from(selected) }
     val minMonth = minDate?.let { YearMonth.from(it) }
     val maxMonth = maxDate?.let { YearMonth.from(it) }
 

@@ -21,7 +21,7 @@ tandemplanner/
 ├─ ui/calendar/           CalendarScreen: 전체 조립
 ├─ ui/year/               YearGrid, YearHeader(지남/남음 토글과 오도미터)
 ├─ ui/month/              MonthDetail, MonthBands(여러 날 띠), EventRow(체크리스트 칩), SelectionRing
-├─ ui/editor/             EventEditorSheet, TimeWheel
+├─ ui/editor/             EventEditorSheet, TimeWheel, InlineDatePicker(날짜를 누르면 펼쳐지는 달력)
 ├─ ui/checklist/          ChecklistButton, ChecklistSheet(목록·일정 연결 달력), ChecklistDetail(항목), ChecklistEffects
 ├─ ui/common/             DayCell, MonthGrid, EventMarks, CalendarLabels(koreanDayLabel), TimeFormat, WheelPicker, GlyphButton, Members, YearPaint
 ├─ ui/effects/            Haptics, IntroOverlay, ReduceMotion, SeasonParticles

@@ -293,6 +293,17 @@ fun CalendarScreen(
     val saveDraft: (EventDraft) -> Unit = { d ->
         calendar.addEvent(d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
     }
+    /**
+     * Opens the month of a just-saved event and selects its day, so the event
+     * doesn't seem to vanish when it was put on another day. Stays put for
+     * another year (the year view isn't switched).
+     */
+    fun followSaved(day: LocalDate) {
+        if (day.year != year) return
+        focusDate = day
+        focusToken++
+        selectedMonth = day.monthValue
+    }
 
     val bgTint by animateColorAsState(
         targetValue = dayColor(today).copy(alpha = if (dark) 0.08f else 0.12f),
@@ -477,15 +488,14 @@ fun CalendarScreen(
                             },
                             initialSelectedDate = focusDate,
                             focusToken = focusToken,
-                            onAddEvent = saveDraft,
+                            onAddEvent = { d ->
+                                saveDraft(d)
+                                // The editor's month grid can put it on any day.
+                                followSaved(d.date)
+                            },
                             onUpdateEvent = { event, d ->
                                 calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
-                                // Moved to another day: follow it, so it doesn't seem to vanish.
-                                if (d.date != event.date && d.date.year == year) {
-                                    focusDate = d.date
-                                    focusToken++
-                                    selectedMonth = d.date.monthValue
-                                }
+                                if (d.date != event.date) followSaved(d.date)
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
@@ -632,11 +642,7 @@ fun CalendarScreen(
                 saveDraft(saved)
                 quickDraft = null
                 // Jump to the event's month so the new dot is visible.
-                if (saved.date.year == year) {
-                    focusDate = saved.date
-                    focusToken++
-                    selectedMonth = saved.date.monthValue
-                }
+                followSaved(saved.date)
             }
         )
         }
