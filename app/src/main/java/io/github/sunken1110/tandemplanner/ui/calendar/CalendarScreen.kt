@@ -480,6 +480,12 @@ fun CalendarScreen(
                             onAddEvent = saveDraft,
                             onUpdateEvent = { event, d ->
                                 calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
+                                // Moved to another day: follow it, so it doesn't seem to vanish.
+                                if (d.date != event.date && d.date.year == year) {
+                                    focusDate = d.date
+                                    focusToken++
+                                    selectedMonth = d.date.monthValue
+                                }
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
