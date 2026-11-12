@@ -26,6 +26,8 @@ import java.time.LocalTime
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.toJavaDuration
 
 /**
  * Keeps the home-screen widget up to date:
@@ -38,6 +40,9 @@ import kotlinx.coroutines.sync.withLock
 object WidgetUpdater {
     private const val WORK_SYNC = "widget-sync"
     private const val WORK_TICK = "widget-tick"
+
+    /** A timed redraw is never planned sooner than this. */
+    private val MIN_TICK_DELAY = 1.minutes
 
     /** Saves the calendar's events for the widget and redraws it. */
     suspend fun publish(context: Context, calendar: SharedCalendar) {
@@ -169,9 +174,10 @@ object WidgetUpdater {
             .filter { it.isAfter(now) }
             .minOrNull()
         val at = nextTimed ?: midnight.plusMinutes(1)
-        val delay = Duration.between(now, at).toMillis().coerceAtLeast(60_000L)
+        // WorkManager takes a java.time.Duration.
+        val delay = Duration.between(now, at).coerceAtLeast(MIN_TICK_DELAY.toJavaDuration())
         val request = OneTimeWorkRequestBuilder<WidgetRefreshWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setInitialDelay(delay)
             .setInputData(workDataOf(WidgetRefreshWorker.KEY_SYNC to false))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(WORK_TICK, ExistingWorkPolicy.REPLACE, request)
