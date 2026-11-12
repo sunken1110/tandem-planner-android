@@ -3,7 +3,18 @@
     "deny": [
       "Read(./local.properties)",
       "Read(./**/*.jks)",
-      "Read(./**/*.keystore)"
+      "Read(./**/*.keystore)",
+      "Read(./**/google-services.json)",
+      "Bash(*gradlew*install*)",
+      "Bash(*gradlew*connected*)",
+      "Bash(*adb *install*)",
+      "Bash(*adb *am start*)",
+      "Bash(*adb *monkey*)",
+      "PowerShell(*gradlew*install*)",
+      "PowerShell(*gradlew*connected*)",
+      "PowerShell(*adb *install*)",
+      "PowerShell(*adb *am start*)",
+      "PowerShell(*adb *monkey*)"
     ]
   }
 }
