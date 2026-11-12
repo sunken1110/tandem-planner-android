@@ -445,8 +445,9 @@ internal fun ChecklistDetail(
                     scope = scope,
                     onToggle = { toggle(item, true) },
                     onDelete = { delete(item) },
-                    onMoveUp = { moveBy(item, -1) },
-                    onMoveDown = { moveBy(item, 1) },
+                    // Only the moves that can happen: none up for the first, none down for the last.
+                    onMoveUp = if (todo.firstOrNull()?.id != item.id) ({ moveBy(item, -1) }) else null,
+                    onMoveDown = if (todo.lastOrNull()?.id != item.id) ({ moveBy(item, 1) }) else null,
                     onDragStart = { startDrag(item) },
                     onDrag = ::dragBy,
                     onDragEnd = ::endDrag,
