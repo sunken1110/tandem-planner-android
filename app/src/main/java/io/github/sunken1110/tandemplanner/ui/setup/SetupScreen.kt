@@ -50,6 +50,9 @@ import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import kotlinx.coroutines.launch
 
+/** The four seasons' colors in a row (the accent above the title); built once. */
+private val SeasonBar = Brush.horizontalGradient(Season.entries.map { it.color })
+
 /**
  * First-run screen: enter a display name, then either create a new shared
  * calendar or join one with a 6-character code from the partner.
@@ -105,7 +108,7 @@ fun SetupScreen(calendar: SharedCalendar) {
                 Modifier
                     .size(width = 44.dp, height = 6.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(Brush.horizontalGradient(Season.entries.map { it.color }))
+                    .background(SeasonBar)
             )
             Spacer(Modifier.height(16.dp))
             Text("공동 달력 시작하기", fontSize = 26.sp, fontWeight = FontWeight.Medium)

@@ -2,6 +2,7 @@ package io.github.sunken1110.tandemplanner.data
 
 import java.time.LocalDate
 import java.time.LocalTime
+import java.util.Locale
 import java.time.temporal.ChronoUnit
 
 /**
@@ -75,7 +76,7 @@ data class EventSnapshot(
  * - today's timed events whose time ([now]) has passed are left out.
  */
 fun Collection<Event>.upcoming(today: LocalDate, now: LocalTime): List<Event> {
-    val nowStored = "%02d:%02d".format(now.hour, now.minute)
+    val nowStored = String.format(Locale.ROOT, "%02d:%02d", now.hour, now.minute)
     return filter { e ->
         when {
             e.lastDate.isBefore(today) -> false

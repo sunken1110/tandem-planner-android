@@ -24,6 +24,8 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Keeps the home-screen widget up to date:
@@ -64,12 +66,22 @@ object WidgetUpdater {
         }
     }
 
+    /**
+     * One redraw at a time: the app's publish and the hourly job can both redraw at
+     * once, and whichever reached Android last would win, possibly with older events.
+     */
+    private val drawing = Mutex()
+
     /** Redraws every placed widget (if any) and plans the next timed redraw. */
     suspend fun render(context: Context) {
         val ids = placedIds(context)
         if (ids.isEmpty()) return
-        ids.forEach { runCatching { refresh(context, it) } }
+        drawing.withLock { ids.forEach { runCatching { draw(context, it) } } }
         scheduleTick(context)
+        // Also makes sure the hourly refresh exists (cheap: an existing one is kept).
+        // It is set up when the first widget is placed, but clearing the app's storage
+        // removes it while the widgets stay, and nothing else would bring it back.
+        schedulePeriodic(context)
     }
 
     /**
@@ -81,11 +93,15 @@ object WidgetUpdater {
      * handed to Android's widget manager. Only if that fails does it fall back to
      * Glance's usual (slower) update.
      *
-     * The refresh stamp is bumped first, so a running session also redraws.
-     * Returns that stamp; the widget reports it back once drawn
-     * ([WidgetStyleStore.renderedStamp]).
+     * A new refresh stamp is saved in the widget's state first and drawn with it;
+     * the widget reports it back once drawn ([WidgetStyleStore.renderedStamp]),
+     * which is how the settings screen knows its change is on the home screen.
+     * Returns that stamp.
      */
-    suspend fun refresh(context: Context, id: GlanceId): Long {
+    suspend fun refresh(context: Context, id: GlanceId): Long = drawing.withLock { draw(context, id) }
+
+    /** [refresh] without taking the lock (for callers that already hold it). */
+    private suspend fun draw(context: Context, id: GlanceId): Long {
         val stamp = System.currentTimeMillis()
         updateAppWidgetState(context, id) { it[RefreshStamp] = stamp }
         val direct = runCatching {

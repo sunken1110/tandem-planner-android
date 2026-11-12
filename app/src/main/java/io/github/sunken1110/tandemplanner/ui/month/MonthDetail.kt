@@ -1,5 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.month
 
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.Animatable as ColorAnimatable
@@ -129,7 +130,7 @@ private const val RING_GLOW_FADE_MS = 400
 private const val RING_GLIDE_MS = 420
 
 /** The landing pop starts this long after the glide begins (just before it ends). */
-private const val RING_POP_LEAD_MS = 330
+private val RING_POP_LEAD = 330.milliseconds
 
 /** How much the ring grows at the peak of the landing pop. */
 private const val RING_POP_SCALE = 1.055f
@@ -225,10 +226,10 @@ fun MonthDetail(
     var editingEvent by remember { mutableStateOf<Event?>(null) }
     // The event whose delete button was tapped, waiting for confirmation.
     var deletingEvent by remember { mutableStateOf<Event?>(null) }
+    // Every event once (a multi-day event is listed under each of its days).
+    val allEvents = remember(eventsByDate) { eventsByDate.values.flatten().distinctBy { it.id } }
     // Rows of this month's multi-day bands; recomputed only when the events change.
-    val bandLayout = remember(yearMonth, eventsByDate) {
-        layoutBands(yearMonth, eventsByDate.values.flatten())
-    }
+    val bandLayout = remember(yearMonth, allEvents) { layoutBands(yearMonth, allEvents) }
 
     // ── Auto-scroll so the selected day's events are fully visible ──
     // Bumped on each day tap (and on open when a specific date was requested);
@@ -334,7 +335,7 @@ fun MonthDetail(
         } else {
             // Start the pop just before the glide ends, so both read as one motion.
             launch {
-                delay(RING_POP_LEAD_MS.milliseconds)
+                delay(RING_POP_LEAD)
                 popRing(ringScale)
             }
             ringPos.animateTo(ringTarget, tween(RING_GLIDE_MS, easing = FastOutSlowInEasing))
@@ -400,13 +401,9 @@ fun MonthDetail(
         ) {
             TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹ ${yearMonth.year}년") }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1) {
-                Text("‹", fontSize = 20.sp)
-            }
+            GlyphButton("‹", "이전 달", onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1)
             Text("${yearMonth.monthValue}월", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            TextButton(onClick = { haptics.tap(); onNext() }, enabled = yearMonth.monthValue < 12) {
-                Text("›", fontSize = 20.sp)
-            }
+            GlyphButton("›", "다음 달", onClick = { haptics.tap(); onNext() }, enabled = yearMonth.monthValue < 12)
         }
 
         // ── Everything below scrolls ──
@@ -594,7 +591,7 @@ fun MonthDetail(
                     }
                 }
             } else {
-                // Blur-mask glow (Android 11 and older): one layer with a fixed blur, so
+                // Blur-mask glow (USE_GPU_GLOW off, for comparison): one layer with a fixed blur, so
                 // the blurred shape is rasterized once; breathing uses alpha and scale.
                 Box(
                     Modifier
@@ -726,7 +723,7 @@ fun MonthDetail(
     if (showAddDialog) {
         EventEditorSheet(
             initial = EventDraft(date = selectedDate, time = null, title = ""),
-            history = remember(eventsByDate) { eventsByDate.values.flatten().distinctBy { it.id } },
+            history = allEvents,
             onDismiss = { showAddDialog = false },
             onSave = { draft ->
                 onAddEvent(draft)
@@ -749,9 +746,7 @@ fun MonthDetail(
                     )
                 },
                 // Leave the event itself out, so it doesn't "suggest" its own old time.
-                history = remember(eventsByDate, event.id) {
-                    eventsByDate.values.flatten().filter { it.id != event.id }.distinctBy { it.id }
-                },
+                history = remember(allEvents, event.id) { allEvents.filter { it.id != event.id } },
                 onDismiss = { editingEvent = null },
                 onSave = { draft ->
                     onUpdateEvent(event, draft)

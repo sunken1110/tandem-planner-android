@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
@@ -101,7 +102,12 @@ fun DayCell(
                 } else null
                 val band = size.minDimension * 0.35f
                 val half = (size.width + size.height) / 2f
-                val shineColors = listOf(Color.Transparent, Color.White.copy(alpha = 0.7f), Color.Transparent)
+                // One diagonal band of light, built once; each frame only moves it.
+                val shine = Brush.linearGradient(
+                    listOf(Color.Transparent, Color.White.copy(alpha = 0.7f), Color.Transparent),
+                    start = Offset(-band, -band),
+                    end = Offset(band, band)
+                )
                 val bw = borderWidth.toPx()
                 val strokeTopLeft = Offset(bw / 2, bw / 2)
                 val strokeSize = Size(size.width - bw, size.height - bw)
@@ -123,14 +129,11 @@ fun DayCell(
                     if (shimmer != null && clip != null && p > 0f) {
                         val m = -band + (half + band * 2f) * shimmer.value
                         clipPath(clip) {
-                            drawRect(
-                                brush = Brush.linearGradient(
-                                    shineColors,
-                                    start = Offset(m - band, m - band),
-                                    end = Offset(m + band, m + band)
-                                ),
-                                alpha = p
-                            )
+                            // The band is centered at (m, m): shift the brush there and
+                            // draw the cell's rectangle back at the origin.
+                            translate(m, m) {
+                                drawRect(brush = shine, topLeft = Offset(-m, -m), size = size, alpha = p)
+                            }
                         }
                     }
 

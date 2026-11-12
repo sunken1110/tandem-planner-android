@@ -1,5 +1,8 @@
 package io.github.sunken1110.tandemplanner.ui.editor
 
+import io.github.sunken1110.tandemplanner.ui.common.koreanDayLabel
+import io.github.sunken1110.tandemplanner.MAX_EVENT_TITLE
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -60,7 +63,6 @@ import androidx.compose.ui.graphics.Color
 import io.github.sunken1110.tandemplanner.ui.checklist.ChecklistIcon
 import io.github.sunken1110.tandemplanner.ui.checklist.CompleteGreen
 import io.github.sunken1110.tandemplanner.ui.common.koreanLabel
-import io.github.sunken1110.tandemplanner.ui.common.koreanShort
 import io.github.sunken1110.tandemplanner.ui.common.weekendColor
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import kotlinx.coroutines.delay
@@ -71,7 +73,7 @@ import java.time.temporal.ChronoUnit
 import kotlin.time.Duration.Companion.milliseconds
 
 /** Wait this long after typing stops before looking up past events, so the hint doesn't flicker. */
-private const val RECALL_DEBOUNCE_MS = 300
+private val RECALL_DEBOUNCE = 300.milliseconds
 
 /** Default time when the user first turns a time on: the next full hour. */
 private fun nextFullHour(): LocalTime = LocalTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
@@ -82,7 +84,7 @@ private fun nextFullHour(): LocalTime = LocalTime.now().plusHours(1).withMinute(
  */
 private fun LocalDate.koreanLabel(): String =
     (if (year != currentDate().year) "${year}년 " else "") +
-        "${monthValue}월 ${dayOfMonth}일 (${dayOfWeek.koreanShort()})" + (KoreanHolidays.of(this)?.let { " ${it.short}" } ?: "")
+        koreanDayLabel() + (KoreanHolidays.of(this)?.let { " ${it.short}" } ?: "")
 
 /** Red for public holidays and Sundays, sky blue for Saturdays, null otherwise. */
 private fun LocalDate.labelColor(): Color? =
@@ -155,7 +157,7 @@ fun EventEditorSheet(
     var suggestion by remember { mutableStateOf<TimeSuggestion?>(null) }
     var lastHint by remember { mutableStateOf<TimeSuggestion?>(null) }
     LaunchedEffect(title, history) {
-        delay(RECALL_DEBOUNCE_MS.milliseconds)
+        delay(RECALL_DEBOUNCE)
         suggestion = TimeRecall.suggest(title, history)
     }
 
@@ -178,7 +180,7 @@ fun EventEditorSheet(
         ) {
             // ── Date (stepper, so parsed dates can be nudged) ──
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { haptics.tap(); shiftStart(-1) }) { Text("‹", fontSize = 20.sp) }
+                GlyphButton("‹", "하루 전", onClick = { haptics.tap(); shiftStart(-1) })
                 Text(
                     if (multiDay) "${date.koreanLabel()} 부터" else date.koreanLabel(),
                     fontSize = 18.sp,
@@ -187,7 +189,7 @@ fun EventEditorSheet(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                TextButton(onClick = { haptics.tap(); shiftStart(1) }) { Text("›", fontSize = 20.sp) }
+                GlyphButton("›", "하루 뒤", onClick = { haptics.tap(); shiftStart(1) })
             }
 
             // ── Last day (multi-day events only) ──
@@ -199,10 +201,12 @@ fun EventEditorSheet(
                 val end = endDate ?: date.plusDays(lastSpanDays)
                 val days = ChronoUnit.DAYS.between(date, end) + 1
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
+                    GlyphButton(
+                        "‹",
+                        "마지막 날 하루 앞으로",
                         onClick = { haptics.tap(); endDate = end.minusDays(1) },
                         enabled = days > 2
-                    ) { Text("‹", fontSize = 20.sp) }
+                    )
                     Text(
                         "${end.koreanLabel()} 까지 · ${days}일",
                         fontSize = 18.sp,
@@ -211,10 +215,12 @@ fun EventEditorSheet(
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center
                     )
-                    TextButton(
+                    GlyphButton(
+                        "›",
+                        "마지막 날 하루 뒤로",
                         onClick = { haptics.tap(); endDate = end.plusDays(1) },
                         enabled = days < MAX_EVENT_DAYS
-                    ) { Text("›", fontSize = 20.sp) }
+                    )
                 }
             }
 
@@ -239,7 +245,8 @@ fun EventEditorSheet(
             // ── Title ──
             OutlinedTextField(
                 value = title,
-                onValueChange = { title = it; showError = false },
+                // At most what the server accepts (longer titles would be rejected).
+                onValueChange = { title = it.take(MAX_EVENT_TITLE); showError = false },
                 label = { Text("일정 내용") },
                 singleLine = true,
                 isError = showError,

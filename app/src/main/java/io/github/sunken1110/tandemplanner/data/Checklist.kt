@@ -2,6 +2,7 @@ package io.github.sunken1110.tandemplanner.data
 
 import android.content.Context
 import android.os.SystemClock
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -113,6 +114,9 @@ fun checklistLabel(listTitle: String, eventTitle: String): String {
     }
 }
 
+/** How far these items are checked. */
+fun List<ChecklistItem>.progress(): ChecklistProgress = ChecklistProgress(count { it.done }, size)
+
 /** What an event's day list shows about the checklist linked to it. */
 data class ChecklistSummary(val listId: String, val title: String, val progress: ChecklistProgress)
 
@@ -221,6 +225,14 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     fun start() {
         stop()
         val code = calendar.roomCode ?: return
+        // Another room (joined or recovered elsewhere): forget the old one's lists.
+        if (code != roomCode) {
+            lists = emptyList()
+            items.clear()
+            pendingDeletes.clear()
+            highlights.clear()
+            presence = emptyMap()
+        }
         roomCode = code
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -259,6 +271,8 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
         presenceReg = null
         loaded.clear()
         live.clear()
+        // The lists and items stay: stop() also runs when the screen is rebuilt
+        // (turning the phone), and start() picks up again with what's shown.
     }
 
     private fun listenItems(code: String, listId: String): ListenerRegistration =
@@ -305,7 +319,10 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
                     DocumentChange.Type.REMOVED -> null
                 }
                 if (change != null) {
-                    highlights[item.id] = SystemClock.elapsedRealtime()
+                    val now = SystemClock.elapsedRealtime()
+                    // Old glows are over; forget them so the map doesn't grow all session.
+                    highlights.entries.removeAll { now - it.value > HIGHLIGHT_MS }
+                    highlights[item.id] = now
                     _changes.tryEmit(change)
                 }
             }
@@ -323,10 +340,7 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     fun itemsOf(listId: String): List<ChecklistItem> =
         items[listId].orEmpty().filter { it.id !in pendingDeletes }
 
-    fun progressOf(listId: String): ChecklistProgress {
-        val list = itemsOf(listId)
-        return ChecklistProgress(list.count { it.done }, list.size)
-    }
+    fun progressOf(listId: String): ChecklistProgress = itemsOf(listId).progress()
 
     /**
      * Lists still to finish, for the badge on the checklist button: lists with at
@@ -342,11 +356,18 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
         }
     }
 
-    /** The checklists linked to [eventId], oldest first, for the event's row in the day list. */
-    fun summariesFor(eventId: String): List<ChecklistSummary> =
-        lists.filter { it.eventId == eventId }
+    /**
+     * Event id → its checklists, oldest first. Worked out once per change of the
+     * lists or items, not once per event row that asks ([summariesFor]).
+     */
+    private val summariesByEvent: Map<String, List<ChecklistSummary>> by derivedStateOf {
+        lists.filter { it.eventId != null }
             .sortedWith(compareBy<ChecklistList> { it.createdAtMs }.thenBy { it.id })
-            .map { ChecklistSummary(it.id, it.title, progressOf(it.id)) }
+            .groupBy({ it.eventId!! }) { ChecklistSummary(it.id, it.title, progressOf(it.id)) }
+    }
+
+    /** The checklists linked to [eventId], oldest first, for the event's row in the day list. */
+    fun summariesFor(eventId: String): List<ChecklistSummary> = summariesByEvent[eventId].orEmpty()
 
     /** Other members who have [listId] open right now ([nowMs] = wall clock). */
     fun viewersOf(listId: String, nowMs: Long): List<String> =
@@ -354,8 +375,9 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
             !calendar.isMe(uid) && note.first == listId && nowMs - note.second < PRESENCE_FRESH_MS
         }.keys.toList()
 
+    // Read only: writing the cache here would change state while the screen is being drawn.
     fun isHidingDone(listId: String): Boolean =
-        hideDone.getOrPut(listId) { prefs.getBoolean("hide_$listId", false) }
+        hideDone[listId] ?: prefs.getBoolean("hide_$listId", false)
 
     fun setHidingDone(listId: String, hide: Boolean) {
         hideDone[listId] = hide

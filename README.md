@@ -129,7 +129,8 @@
 ```
 app/src/main/java/io/github/sunken1110/tandemplanner/
 ├─ MainActivity.kt          # Entry point: splash → intro → setup or calendar; widget launches
-├─ AppConfig.kt             # Tunables: animation timing, debug date override
+├─ AppState.kt              # ViewModel holding the calendar and checklists across rotation
+├─ AppConfig.kt             # Tunables: animation timing, limits, debug date override
 ├─ ai/
 │   ├─ EventParser.kt       # Sentence → EventDraft interface (the AI seam)
 │   ├─ RuleBasedEventParser.kt  # Regex-based Korean date, time and period extraction
@@ -151,7 +152,7 @@ app/src/main/java/io/github/sunken1110/tandemplanner/
 │   └─ WidgetConfigActivity.kt  # Background settings screen with photo crop
 └─ ui/
     ├─ theme/               # Material theme + calendar/member colors
-    ├─ common/              # DayCell, MonthGrid, EventMarks (chips, D-day badge), WheelPicker, YearPaint, time/member helpers
+    ├─ common/              # DayCell, MonthGrid, EventMarks (chips, D-day badge), WheelPicker, YearPaint, GlyphButton, time/member helpers
     ├─ editor/              # Event editor bottom sheet, time wheel
     ├─ quickadd/            # Floating natural-language input with live preview
     ├─ checklist/           # Checklist button, sheet (all lists / one list), rows, celebration

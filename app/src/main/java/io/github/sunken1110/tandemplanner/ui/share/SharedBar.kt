@@ -30,7 +30,7 @@ import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
 /** Sync status must persist this long before it is shown, to avoid a flash on app start. */
-private const val STATUS_DEBOUNCE_MS = 2_000
+private val STATUS_DEBOUNCE = 2_000.milliseconds
 
 /**
  * Top bar of the calendar: members (color dot + name) on the left and a sync
@@ -69,7 +69,7 @@ fun SharedBar(calendar: SharedCalendar, onClick: () -> Unit) {
         var showStatus by remember { mutableStateOf(false) }
         val busy = calendar.offline || calendar.pendingWrites
         LaunchedEffect(busy) {
-            if (busy) delay(STATUS_DEBOUNCE_MS.milliseconds)
+            if (busy) delay(STATUS_DEBOUNCE)
             showStatus = busy
         }
         AnimatedVisibility(visible = showStatus) {

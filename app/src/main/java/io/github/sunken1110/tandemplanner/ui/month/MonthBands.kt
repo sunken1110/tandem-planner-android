@@ -48,10 +48,6 @@ data class BandLayout(val events: List<Event>, val lanes: Map<String, Int>) {
 
     /** Multi-day events on [day] that have no band. */
     fun hiddenCount(day: LocalDate): Int = events.count { it.covers(day) && it.id !in lanes }
-
-    companion object {
-        val Empty = BandLayout(emptyList(), emptyMap())
-    }
 }
 
 /**

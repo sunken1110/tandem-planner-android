@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +81,8 @@ fun ChecklistButton(openLists: Int, season: Season, onClick: () -> Unit, modifie
                 color = Color.White,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
+                    // The button's own description already says how many are left.
+                    .clearAndSetSemantics {}
                     .defaultMinSize(minWidth = 18.dp)
                     .clip(CircleShape)
                     // A deep tone of the season, so white text reads even on winter's silver.

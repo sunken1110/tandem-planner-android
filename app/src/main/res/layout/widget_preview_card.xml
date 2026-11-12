@@ -43,7 +43,7 @@
             android:text="하와이 여행"
             android:textColor="#2B2622"
             android:textSize="14sp"
-            android:textStyle="bold" />
+            android:fontFamily="sans-serif-medium" />
 
         <TextView
             android:layout_width="wrap_content"

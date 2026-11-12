@@ -1,5 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.month
 
+import io.github.sunken1110.tandemplanner.ui.common.koreanDayLabel
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.MutableTransitionState
@@ -60,7 +61,6 @@ import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.checklistLabel
 import io.github.sunken1110.tandemplanner.data.EventSnapshot
 import io.github.sunken1110.tandemplanner.ui.checklist.CompleteGreen
-import io.github.sunken1110.tandemplanner.ui.common.koreanShort
 import io.github.sunken1110.tandemplanner.ui.common.displayTime
 import io.github.sunken1110.tandemplanner.ui.common.periodLabel
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
@@ -134,7 +134,7 @@ fun EventRow(
                     when {
                         event.isMultiDay -> {
                             val nth = ChronoUnit.DAYS.between(event.date, day) + 1
-                            "${rangeLabel(event.date, event.lastDate)} · $nth/${event.dayCount}일째"
+                            "${periodLabel(event.date, event.lastDate)} · $nth/${event.dayCount}일째"
                         }
                         event.time.isBlank() -> "하루 종일"
                         else -> displayTime(event.time)
@@ -509,9 +509,9 @@ fun DeleteEventDialog(
     onDismiss: () -> Unit
 ) {
     val date = if (event.isMultiDay) {
-        rangeLabel(event.date, event.lastDate, weekdays = true)
+        periodLabel(event.date, event.lastDate, weekdays = true)
     } else {
-        "${event.date.monthValue}월 ${event.date.dayOfMonth}일 (${event.date.dayOfWeek.koreanShort()})"
+        event.date.koreanDayLabel()
     }
     val time = when {
         event.isMultiDay -> "${event.dayCount}일"
@@ -555,8 +555,8 @@ private fun editNote(editor: String, current: Event, original: EventSnapshot): S
         if (original.date != current.date || original.endDate != current.endDate) {
             val end = original.endDate
             add(
-                if (end != null) rangeLabel(original.date, end)
-                else "${original.date.monthValue}월 ${original.date.dayOfMonth}일 (${original.date.dayOfWeek.koreanShort()})"
+                if (end != null) periodLabel(original.date, end)
+                else original.date.koreanDayLabel()
             )
         }
         if (original.time != current.time) {
@@ -569,12 +569,6 @@ private fun editNote(editor: String, current: Event, original: EventSnapshot): S
     return "${name}${subjectParticle(name)} 수정함 · 원래 $summary"
 }
 
-/**
- * A period such as "11월 3일 ~ 6일", or "10월 30일 ~ 11월 2일" across months
- * (with weekdays: "11월 3일 (화) ~ 6일 (금)").
- */
-fun rangeLabel(from: LocalDate, to: LocalDate, weekdays: Boolean = false): String =
-    periodLabel(from, to, weekdays)
 
 /** Korean subject particle: "이" after a final consonant ("지훈이"), else "가" ("민지가"). */
 private fun subjectParticle(word: String): String {

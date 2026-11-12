@@ -1,5 +1,10 @@
 package io.github.sunken1110.tandemplanner.ui.year
 
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
@@ -99,6 +104,12 @@ private fun MonthCard(
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
             .clickable(onClick = onClick)
+            // Read as "11월", not as the month name followed by every weekday letter.
+            .clearAndSetSemantics {
+                contentDescription = "${yearMonth.monthValue}월"
+                role = Role.Button
+                onClick { onClick(); true }
+            }
             .padding(6.dp)
     ) {
         Text("${yearMonth.monthValue}월", fontSize = 12.sp, fontWeight = FontWeight.Medium)
