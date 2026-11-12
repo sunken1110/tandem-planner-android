@@ -97,6 +97,17 @@ fun Collection<Event>.nextUpcoming(today: LocalDate, now: LocalTime): Event? = u
 const val MAX_EVENT_DAYS = 60
 
 /**
+ * The first [max] chars, like [take], but never half an emoji: when the cut
+ * falls between the two halves of a surrogate pair, the lone first half is
+ * dropped too (it would show as a broken character).
+ */
+fun String.takeWhole(max: Int): String {
+    if (length <= max) return this
+    val cut = take(max)
+    return if (cut.lastOrNull()?.isHighSurrogate() == true) cut.dropLast(1) else cut
+}
+
+/**
  * Events in display order: multi-day events first (earlier start, then longer
  * first), then all-day events (no time), since they apply to the whole day, then
  * timed events by time.

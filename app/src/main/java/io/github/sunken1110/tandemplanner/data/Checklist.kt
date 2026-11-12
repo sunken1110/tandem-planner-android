@@ -90,7 +90,7 @@ fun defaultChecklistTitle(eventTitle: String, taken: Collection<String> = emptyL
     var n = 1
     while (true) {
         val number = if (n == 1) "" else " $n"
-        val name = eventTitle.trim().take(MAX_LIST_TITLE - DEFAULT_SUFFIX.length - number.length) + DEFAULT_SUFFIX + number
+        val name = eventTitle.trim().takeWhole(MAX_LIST_TITLE - DEFAULT_SUFFIX.length - number.length) + DEFAULT_SUFFIX + number
         if (name !in used) return name
         n++
     }
@@ -438,7 +438,7 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     fun createList(title: String, eventId: String? = null): String? {
         val code = roomCode ?: return null
         val me = calendar.uid ?: return null
-        val name = title.trim().take(MAX_LIST_TITLE).ifEmpty { return null }
+        val name = title.trim().takeWhole(MAX_LIST_TITLE).ifEmpty { return null }
         val ref = listsOf(code).document()
         val data = mutableMapOf(
             "title" to name,
@@ -453,7 +453,7 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
 
     fun renameList(list: ChecklistList, title: String) {
         val code = roomCode ?: return
-        val name = title.trim().take(MAX_LIST_TITLE).ifEmpty { return }
+        val name = title.trim().takeWhole(MAX_LIST_TITLE).ifEmpty { return }
         if (name == list.title) return
         listsOf(code).document(list.id)
             .update(mapOf("title" to name, "updatedAt" to FieldValue.serverTimestamp()))
@@ -489,7 +489,7 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     fun addItem(listId: String, text: String) {
         val code = roomCode ?: return
         val me = calendar.uid ?: return
-        val value = text.trim().take(MAX_ITEM_TEXT).ifEmpty { return }
+        val value = text.trim().takeWhole(MAX_ITEM_TEXT).ifEmpty { return }
         // A tiny random part keeps two items added at the same moment on both phones
         // from getting exactly the same number (which would make them unmovable
         // relative to each other).

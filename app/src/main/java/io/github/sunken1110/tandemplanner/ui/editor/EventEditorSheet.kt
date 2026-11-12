@@ -2,6 +2,7 @@ package io.github.sunken1110.tandemplanner.ui.editor
 
 import io.github.sunken1110.tandemplanner.ui.common.koreanDayLabel
 import io.github.sunken1110.tandemplanner.MAX_EVENT_TITLE
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -246,7 +247,7 @@ fun EventEditorSheet(
             OutlinedTextField(
                 value = title,
                 // At most what the server accepts (longer titles would be rejected).
-                onValueChange = { title = it.take(MAX_EVENT_TITLE); showError = false },
+                onValueChange = { title = it.takeWhole(MAX_EVENT_TITLE); showError = false },
                 label = { Text("일정 내용") },
                 singleLine = true,
                 isError = showError,

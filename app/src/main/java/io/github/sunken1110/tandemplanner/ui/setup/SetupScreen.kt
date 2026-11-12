@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.MAX_NAME_LENGTH
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
@@ -122,7 +123,7 @@ fun SetupScreen(calendar: SharedCalendar) {
 
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(MAX_NAME_LENGTH); nameError = false },
+                onValueChange = { name = it.takeWhole(MAX_NAME_LENGTH); nameError = false },
                 label = { Text("내 이름") },
                 singleLine = true,
                 isError = nameError,

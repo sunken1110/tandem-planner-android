@@ -86,6 +86,7 @@ import io.github.sunken1110.tandemplanner.data.ChecklistList
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.MAX_LIST_TITLE
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.data.sortedByTime
 import io.github.sunken1110.tandemplanner.model.KoreanHolidays
@@ -504,7 +505,7 @@ internal fun DashedInputField(
         Spacer(Modifier.width(10.dp))
         BasicTextField(
             value = text,
-            onValueChange = { text = it.take(maxLength) },
+            onValueChange = { text = it.takeWhole(maxLength) },
             singleLine = true,
             textStyle = LocalTextStyle.current.copy(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(accent),
@@ -560,7 +561,7 @@ private fun RenameDialog(current: String, onConfirm: (String) -> Unit, onDismiss
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(MAX_LIST_TITLE) },
+                onValueChange = { name = it.takeWhole(MAX_LIST_TITLE) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) onConfirm(name) })

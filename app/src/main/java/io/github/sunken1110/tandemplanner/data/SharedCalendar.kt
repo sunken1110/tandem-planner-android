@@ -621,7 +621,7 @@ class SharedCalendar(context: Context) {
         runCatching { LocalDate.parse(this) }.getOrNull()?.takeIf { it.isAfter(after) }
 
     /** A title the security rules accept: trimmed, at most [MAX_EVENT_TITLE] characters. */
-    private fun String.fitTitle(): String = trim().take(MAX_EVENT_TITLE)
+    private fun String.fitTitle(): String = trim().takeWhole(MAX_EVENT_TITLE)
 
     /** A new room code. Knowing it is enough to join a room with one member, so it's unguessable. */
     private fun randomCode(): String =
