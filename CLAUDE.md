@@ -16,14 +16,18 @@ Tandem is an Android app for two people: a shared calendar, shared checklists an
 
 ```bash
 ./gradlew.bat assembleDebug          # debug APK; run after every change
-./gradlew.bat installDebug           # install on a connected device/emulator
 ./gradlew.bat lint                   # Android lint
 ./gradlew.bat test                   # JVM unit tests
 ./gradlew.bat test --tests "io.github.sunken1110.tandemplanner.SomeTest"   # single test class
-./gradlew.bat connectedAndroidTest   # instrumented tests (needs a device)
 ```
 
 There are no test sources yet (`app/src/test` and `app/src/androidTest` don't exist). Build types: `debug`, `release`, `benchmark`.
+
+## Device installs
+
+- Never install or launch the app on a phone or emulator: no `installDebug`, `connectedAndroidTest`, `adb install`, `adb shell am start` or similar. These are also denied in `.claude/settings.json`.
+- Why: `installDebug` installs into every user profile on the device, including Dual Apps and Secure Folder.
+- The user installs with **Run** in Android Studio. Claude stops after the build and tells the user: "Android Studio의 Run으로 확인해 주세요."
 
 ## Architecture
 
@@ -69,7 +73,7 @@ Reasons and history: `docs/handoff.md`, section 4.
 
 - **UI changes: show a demo (mockup) first.** Write the code only after the user picks one.
 - Show demos as an HTML mockup file or a Compose `@Preview`. Never commit mockup files.
-- After a change, build with `./gradlew.bat assembleDebug` yourself, confirm it passes, and report the result. If it fails, report the error.
+- After a change, build with `./gradlew.bat assembleDebug` yourself, confirm it passes, and report the result. If it fails, report the error. Don't install it (see "Device installs"); ask the user to check it with Run.
 - When you add a new file, tell the user (it must be added to version control).
 
 ## Git
@@ -80,7 +84,17 @@ Reasons and history: `docs/handoff.md`, section 4.
 - Never use `git push --no-verify` or force push.
 - Never delete or move tags.
 - Before committing, check with `git status` which files will be included. Write commit messages in English.
-- Write PR titles and descriptions in English.
+
+## Pull requests
+
+- PR titles and descriptions are in **English**. The description uses these sections:
+  - **Summary**: one or two sentences on what the PR does.
+  - **Changes**: the changes, grouped by file or area.
+  - **Why**: the problem or reason behind them.
+  - **How to test**: steps the user can follow (build, then what to check with Run in Android Studio).
+  - **Notes**: risks, follow-ups, `firestore.rules` or Firestore field changes, new files. Write "None" if empty.
+- After opening a PR, verify it with the `pr-reviewer` subagent (`.claude/agents/pr-reviewer.md`).
+- Explain the review result to the user in **Korean** first. Only after the user confirms, post the reviewer's English report to the PR with `gh pr comment <number> --body-file <file>`.
 
 ## Security
 
