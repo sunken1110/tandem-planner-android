@@ -541,8 +541,12 @@ private fun listRows(height: Dp, scale: Float): Int =
 /** Everything in the list layout but the rows: padding, the card, the divider and "+". */
 private fun listChrome(scale: Float): Dp = 20.dp + (SMALL_LINE * 2 + TITLE_LINE) * scale + 13.dp + 28.dp
 
-/** The list layout fits: room for its card and "+" (rows are added as the height allows). */
-private fun listFits(height: Dp, scale: Float): Boolean = height >= listChrome(scale)
+/**
+ * The list layout fits: room for its card and "+" (rows are added as the height
+ * allows). Keeps the same [SAFETY_MARGIN] as [listRows], so a launcher reporting a
+ * little more height than it shows can't push the "+" out of sight.
+ */
+private fun listFits(height: Dp, scale: Float): Boolean = height >= listChrome(scale) + SAFETY_MARGIN
 
 /** A 1×1 tile's status ("연결 필요", "일정 없음"): one centered line. */
 @Composable
