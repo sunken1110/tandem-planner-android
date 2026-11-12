@@ -44,11 +44,15 @@ import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.MAX_NAME_LENGTH
 import io.github.sunken1110.tandemplanner.currentDate
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.model.dayColor
 import io.github.sunken1110.tandemplanner.ui.effects.SeasonParticles
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import kotlinx.coroutines.launch
+
+/** The four seasons' colors in a row (the accent above the title); built once. */
+private val SeasonBar = Brush.horizontalGradient(Season.entries.map { it.color })
 
 /**
  * First-run screen: enter a display name, then either create a new shared
@@ -105,7 +109,7 @@ fun SetupScreen(calendar: SharedCalendar) {
                 Modifier
                     .size(width = 44.dp, height = 6.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(Brush.horizontalGradient(Season.entries.map { it.color }))
+                    .background(SeasonBar)
             )
             Spacer(Modifier.height(16.dp))
             Text("공동 달력 시작하기", fontSize = 26.sp, fontWeight = FontWeight.Medium)
@@ -119,7 +123,7 @@ fun SetupScreen(calendar: SharedCalendar) {
 
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(MAX_NAME_LENGTH); nameError = false },
+                onValueChange = { name = it.takeWhole(MAX_NAME_LENGTH); nameError = false },
                 label = { Text("내 이름") },
                 singleLine = true,
                 isError = nameError,

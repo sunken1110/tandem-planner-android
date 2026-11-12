@@ -48,6 +48,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -104,7 +107,7 @@ import kotlin.time.Duration.Companion.milliseconds
 private val QUICK_ADD_CLEARANCE = 64.dp
 
 /** How long an error message stays on screen. */
-private const val ERROR_VISIBLE_MS = 6_000
+private val ERROR_VISIBLE = 6_000.milliseconds
 
 /**
  * Opacity of the hidden month-view warm-up: far too faint to see, but above 0 so
@@ -113,7 +116,7 @@ private const val ERROR_VISIBLE_MS = 6_000
 private const val WARM_UP_ALPHA = 0.004f
 
 /** How long the warm-up stays: the ring's intro plus its glow and moving light. */
-private const val WARM_UP_MS = 1200
+private val WARM_UP = 1200.milliseconds
 
 /**
  * Main screen once the user has joined a shared calendar.
@@ -128,6 +131,7 @@ private const val WARM_UP_MS = 1200
 @Composable
 fun CalendarScreen(
     calendar: SharedCalendar,
+    checklists: SharedChecklists,
     startFill: Boolean = true,
     launchRequest: LaunchRequest? = null,
     onLaunchHandled: () -> Unit = {}
@@ -190,15 +194,16 @@ fun CalendarScreen(
             minuteNow = LocalTime.now()
         }
     }
-    val nextEvent by remember(today, minuteNow) {
+    // The clock is read inside derivedStateOf, so the minute tick only redraws the
+    // screen when the next event actually changes.
+    val nextEvent by remember(today) {
         derivedStateOf { calendar.events.toList().nextUpcoming(today, minuteNow) }
     }
     val memberColor: (String) -> Color = { calendar.colorOf(it) }
     val nameOf: (Event) -> String = { calendar.displayName(it.authorUid, it.authorName) }
 
-    // Open the share dialog once right after creating a calendar.
-    // Opened once right after creating a room (to share the code) or recovering a
-    // seat (to show the new recovery code, since the used one no longer works).
+    // The share dialog: opened once right after creating a room (to share the code)
+    // or recovering a seat (to show the new recovery code; the used one no longer works).
     var showShare by remember { mutableStateOf(calendar.justCreated || calendar.justRecovered) }
     LaunchedEffect(Unit) {
         calendar.justCreated = false
@@ -248,7 +253,8 @@ fun CalendarScreen(
             .collect { runCatching { WidgetUpdater.publish(context, calendar) } }
     }
     // ── Shared checklists ──
-    val checklists = remember(calendar) { SharedChecklists(calendar, context) }
+    // Only a change in the count redraws the screen (not every checked item).
+    val openLists by remember(today) { derivedStateOf { checklists.openListCount(today) } }
     DisposableEffect(calendar.roomCode) {
         checklists.start()
         onDispose { checklists.stop() }
@@ -328,6 +334,16 @@ fun CalendarScreen(
                 Modifier
                     .fillMaxSize()
                     .graphicsLayer { alpha = WARM_UP_ALPHA }
+                    // Invisible, so it must not take taps (on empty spots of the screen
+                    // above) or TalkBack focus either.
+                    .clearAndSetSemantics {}
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                    }
             ) {
                 MonthDetail(
                     yearMonth = YearMonth.from(today),
@@ -347,7 +363,7 @@ fun CalendarScreen(
                 )
             }
             LaunchedEffect(Unit) {
-                delay(WARM_UP_MS.milliseconds)
+                delay(WARM_UP)
                 prewarmed = true
             }
         }
@@ -486,7 +502,7 @@ fun CalendarScreen(
             focusRequest = quickAddFocus,
             leading = {
                 ChecklistButton(
-                    openLists = checklists.openListCount(today),
+                    openLists = openLists,
                     season = season,
                     onClick = {
                         haptics.tap()
@@ -503,6 +519,9 @@ fun CalendarScreen(
 
         // ── Error toast ──
         val error = calendar.lastError
+        // Keeps showing the last message while the toast fades out (error is null by then).
+        var lastError by remember { mutableStateOf("") }
+        LaunchedEffect(error) { if (error != null) lastError = error }
         AnimatedVisibility(
             visible = error != null,
             enter = fadeIn(),
@@ -521,7 +540,7 @@ fun CalendarScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    error.orEmpty(),
+                    error ?: lastError,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.weight(1f, fill = false)
@@ -531,7 +550,7 @@ fun CalendarScreen(
         }
         LaunchedEffect(error) {
             if (error != null) {
-                delay(ERROR_VISIBLE_MS.milliseconds)
+                delay(ERROR_VISIBLE)
                 calendar.lastError = null
             }
         }
@@ -572,7 +591,7 @@ fun CalendarScreen(
         }
         LaunchedEffect(shownNotice) {
             if (shownNotice != null) {
-                delay(ERROR_VISIBLE_MS.milliseconds)
+                delay(ERROR_VISIBLE)
                 notice = null
             }
         }

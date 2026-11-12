@@ -1,5 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.checklist
 
+import io.github.sunken1110.tandemplanner.ui.common.koreanDayLabel
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -48,7 +49,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,12 +75,18 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.data.ChecklistChange
 import io.github.sunken1110.tandemplanner.data.ChecklistList
 import io.github.sunken1110.tandemplanner.data.Event
 import io.github.sunken1110.tandemplanner.data.MAX_LIST_TITLE
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.data.sortedByTime
 import io.github.sunken1110.tandemplanner.model.KoreanHolidays
@@ -88,7 +94,7 @@ import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
 import io.github.sunken1110.tandemplanner.ui.common.ddayText
 import io.github.sunken1110.tandemplanner.ui.common.displayTime
-import io.github.sunken1110.tandemplanner.ui.common.koreanShort
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import io.github.sunken1110.tandemplanner.ui.common.periodLabel
 import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaders
 import io.github.sunken1110.tandemplanner.ui.common.weekdayHeaderColor
@@ -101,10 +107,12 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
-/** How long a message at the bottom of the sheet stays. */
-private val TOAST_VISIBLE = 4.seconds
+/**
+ * How long a message at the bottom of the sheet stays: gone a little before a
+ * deleted item's undo window ends, so "되돌리기" never shows when it can't work.
+ */
+private val TOAST_VISIBLE = SharedChecklists.UNDO_WINDOW - 500.milliseconds
 
 /**
  * The shared checklists, in a bottom sheet: first all lists (the hub), then one
@@ -160,7 +168,12 @@ fun ChecklistSheet(
             checklists.setViewing(null)
         }
     }
-    LaunchedEffect(open?.id) { checklists.setViewing(open?.id) }
+    // "보는 중" only while the app is on screen: going to the home screen (or
+    // locking the phone) stops saying so, coming back resumes it.
+    LifecycleStartEffect(open?.id) {
+        checklists.setViewing(open?.id)
+        onStopOrDispose { checklists.setViewing(null) }
+    }
 
     // ── Messages ──
     var toast by remember { mutableStateOf<SheetToast?>(null) }
@@ -328,13 +341,8 @@ private fun ChecklistHub(
 ) {
     val haptics = rememberHaptics()
     val reduceMotion = rememberReduceMotion()
-    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(5.seconds)
-            nowMs = System.currentTimeMillis()
-        }
-    }
+    // Looked up once, not once per list card.
+    val eventsById = calendar.events.associateBy { it.id }
 
     Column(
         Modifier
@@ -374,8 +382,7 @@ private fun ChecklistHub(
         LazyColumn(Modifier.weight(1f)) {
             items(lists, key = { it.id }) { list ->
                 val progress = checklists.progressOf(list.id)
-                val viewer = checklists.viewersOf(list.id, nowMs).firstOrNull()
-                val event = list.eventId?.let { id -> calendar.events.firstOrNull { it.id == id } }
+                val event = list.eventId?.let(eventsById::get)
                 Surface(
                     onClick = {
                         haptics.tap()
@@ -398,10 +405,7 @@ private fun ChecklistHub(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            if (viewer != null) {
-                                ViewingBadge(calendar.displayName(viewer, "상대"), calendar.colorOf(viewer), reduceMotion)
-                                Spacer(Modifier.width(8.dp))
-                            }
+                            ViewingNow(checklists, calendar, list.id, reduceMotion, Modifier.padding(end = 8.dp))
                             Text(
                                 when {
                                     progress.complete -> "✓ 완료"
@@ -441,7 +445,7 @@ private fun ChecklistHub(
  */
 internal fun linkedEventLabel(event: Event, today: LocalDate): String {
     val date = if (event.isMultiDay) periodLabel(event.date, event.lastDate, weekdays = true)
-    else "${event.date.monthValue}월 ${event.date.dayOfMonth}일 (${event.date.dayOfWeek.koreanShort()})"
+    else event.date.koreanDayLabel()
     val whenText = if (event.lastDate.isBefore(today)) "지난 일정" else ddayText(event, today)
     return "$date · ${event.title} · $whenText"
 }
@@ -501,7 +505,7 @@ internal fun DashedInputField(
         Spacer(Modifier.width(10.dp))
         BasicTextField(
             value = text,
-            onValueChange = { text = it.take(maxLength) },
+            onValueChange = { text = it.takeWhole(maxLength) },
             singleLine = true,
             textStyle = LocalTextStyle.current.copy(fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(accent),
@@ -533,11 +537,13 @@ internal fun DashedInputField(
                 .size(34.dp)
                 .clip(CircleShape)
                 .background(if (enabled) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                .clickable(enabled = enabled, onClickLabel = "추가") { submit() },
+                .clickable(enabled = enabled, onClickLabel = "추가", role = Role.Button) { submit() }
+                .semantics { contentDescription = "추가" },
             contentAlignment = Alignment.Center
         ) {
             Text(
                 "↑",
+                modifier = Modifier.clearAndSetSemantics {},
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
@@ -555,7 +561,7 @@ private fun RenameDialog(current: String, onConfirm: (String) -> Unit, onDismiss
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(MAX_LIST_TITLE) },
+                onValueChange = { name = it.takeWhole(MAX_LIST_TITLE) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) onConfirm(name) })
@@ -614,7 +620,7 @@ private fun LinkEventDialog(
             Column {
                 // ── Month ──
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { showMonth(month.minusMonths(1)) }) { Text("‹", fontSize = 20.sp) }
+                    GlyphButton("‹", "이전 달", onClick = { showMonth(month.minusMonths(1)) })
                     Text(
                         "${month.year}년 ${month.monthValue}월",
                         fontSize = 15.sp,
@@ -622,7 +628,7 @@ private fun LinkEventDialog(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = { showMonth(month.plusMonths(1)) }) { Text("›", fontSize = 20.sp) }
+                    GlyphButton("›", "다음 달", onClick = { showMonth(month.plusMonths(1)) })
                 }
                 Row {
                     WeekdayHeaders.forEachIndexed { column, label ->
@@ -682,7 +688,7 @@ private fun LinkEventDialog(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "${selected.monthValue}월 ${selected.dayOfMonth}일 (${selected.dayOfWeek.koreanShort()})",
+                    selected.koreanDayLabel(),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)

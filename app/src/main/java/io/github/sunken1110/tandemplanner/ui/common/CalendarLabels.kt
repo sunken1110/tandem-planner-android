@@ -1,5 +1,6 @@
 package io.github.sunken1110.tandemplanner.ui.common
 
+import java.time.LocalDate
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -13,6 +14,9 @@ internal val WeekdayHeaders = listOf("일", "월", "화", "수", "목", "금", "
 
 /** Short Korean weekday name, e.g. "월" for Monday. */
 fun DayOfWeek.koreanShort(): String = WeekdayHeaders[value % 7] // Sunday (7) → index 0
+
+/** "11월 9일 (월)". */
+fun LocalDate.koreanDayLabel(): String = "${monthValue}월 ${dayOfMonth}일 (${dayOfWeek.koreanShort()})"
 
 /** Sunday red / Saturday sky for a Sunday-first column (0..6), or null on weekdays. */
 private fun columnWeekendColor(column: Int): Color? = when (column) {

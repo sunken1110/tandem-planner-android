@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
+import android.util.LruCache
 import androidx.core.content.edit
 import androidx.core.graphics.scale
 import java.io.File
@@ -167,6 +168,7 @@ object WidgetStyleStore {
             remove("zoom_$appWidgetId")
         }
         photoFile(context, appWidgetId).delete()
+        photoCache.snapshot().keys.filter { it.startsWith("$appWidgetId:") }.forEach { photoCache.remove(it) }
     }
 
     /** Called by the widget after drawing: the refresh stamp it has drawn. */
@@ -205,11 +207,30 @@ object WidgetStyleStore {
         return if (w > 0 && h > 0) w.toFloat() / h else null
     }
 
-    /** The widget's saved photo, or null. */
-    fun loadPhoto(context: Context, appWidgetId: Int): Bitmap? {
+    /**
+     * The widget's saved photo ([stamp] = [WidgetStyle.photoStamp]), or null.
+     *
+     * Every refresh draws the widget from scratch, so the decoded photo is kept here
+     * (a few MB each) instead of reading the file again each time. A new photo has a
+     * new stamp, so it's never mixed up with the old one.
+     */
+    fun loadPhoto(context: Context, appWidgetId: Int, stamp: Long): Bitmap? {
+        val key = "$appWidgetId:$stamp"
+        photoCache.get(key)?.let { return it }
         val file = photoFile(context, appWidgetId)
-        return if (file.exists()) runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() else null
+        if (!file.exists()) return null
+        val bitmap = runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() ?: return null
+        photoCache.put(key, bitmap)
+        return bitmap
     }
+
+    /** Decoded photos, up to [PHOTO_CACHE_BYTES] in all; the least recently used goes first. */
+    private val photoCache = object : LruCache<String, Bitmap>(PHOTO_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
+
+    /** About two saved photos at full size. */
+    private const val PHOTO_CACHE_BYTES = 16 * 1024 * 1024
 
     /** Decodes a picked image at most [MAX_PHOTO_SIDE] px on its long side, upright. */
     fun decodeScaled(context: Context, uri: Uri): Bitmap? = runCatching {

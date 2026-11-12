@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.MAX_NAME_LENGTH
 import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.ui.common.MemberDot
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
 import io.github.sunken1110.tandemplanner.ui.common.memberLabel
@@ -146,7 +147,7 @@ fun ShareDialog(calendar: SharedCalendar, onDismiss: () -> Unit) {
                 if (editingName) {
                     OutlinedTextField(
                         value = newName,
-                        onValueChange = { newName = it.take(MAX_NAME_LENGTH) },
+                        onValueChange = { newName = it.takeWhole(MAX_NAME_LENGTH) },
                         label = { Text("새 이름") },
                         singleLine = true,
                         isError = newName.isBlank(),

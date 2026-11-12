@@ -1,5 +1,7 @@
 package io.github.sunken1110.tandemplanner.ui.year
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -144,7 +146,7 @@ fun YearHeader(
         prefs.edit { putBoolean(KEY_SHOW_LEFT, showLeft) }
     }
     LaunchedEffect(switches) {
-        delay(ROLL_WINDOW_MS.milliseconds)
+        delay(ROLL_WINDOW)
         rolling = false
     }
 
@@ -372,7 +374,7 @@ private val RollEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 private const val PASSED_FADE = 0.8f
 
 /** After a switch, changes roll for this long. */
-private const val ROLL_WINDOW_MS = SWITCH_MS
+private val ROLL_WINDOW = SWITCH_MS.milliseconds
 
 private const val HEADER_PREFS = "year_header"
 private const val KEY_SHOW_LEFT = "show_left"
@@ -395,7 +397,14 @@ private fun DayCount(totalDays: Int, shownCount: () -> Int, showLeft: Boolean, r
     val big = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Medium)
     val small = TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-    Row(verticalAlignment = Alignment.Bottom) {
+    // TalkBack reads one sentence: each digit wheel holds all ten digits, which
+    // would otherwise be read out one by one.
+    Row(
+        Modifier.clearAndSetSemantics {
+            contentDescription = "${count}일 ${if (showLeft) "남음" else "지남"}, ${totalDays}일 중 ${percent}%"
+        },
+        verticalAlignment = Alignment.Bottom
+    ) {
         // A year has at most 366 days: three places.
         Odometer(count.toString(), places = 3, style = big, rolling = rolling)
         TurnOver(if (showLeft) "일 남음" else "일 지남", up = showLeft, rolling = rolling) { Text(it, style = big) }

@@ -57,8 +57,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
+/** The four seasons' colors around a circle (the dot at the bar's start); built once. */
+private val SeasonSwirl = Brush.sweepGradient(Season.entries.map { it.color })
+
 /** Wait this long after typing stops before parsing again (keeps future AI calls cheap). */
-private const val PREVIEW_DEBOUNCE_MS = 250
+private val PREVIEW_DEBOUNCE = 250.milliseconds
 
 /**
  * Floating one-line input: "내일 저녁 7시 민지랑 저녁" → parsed draft → editor sheet.
@@ -97,7 +100,7 @@ fun QuickAddBar(
         if (text.isBlank()) {
             preview = null
         } else {
-            delay(PREVIEW_DEBOUNCE_MS.milliseconds)
+            delay(PREVIEW_DEBOUNCE)
             preview = parser.parse(text, today)
         }
     }
@@ -141,7 +144,7 @@ fun QuickAddBar(
                         Modifier
                             .size(12.dp)
                             .clip(CircleShape)
-                            .background(Brush.sweepGradient(Season.entries.map { it.color }))
+                            .background(SeasonSwirl)
                     )
                     Spacer(Modifier.width(12.dp))
                     BasicTextField(

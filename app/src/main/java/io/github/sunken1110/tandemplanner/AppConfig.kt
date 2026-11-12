@@ -23,6 +23,9 @@ internal fun currentDate(): LocalDate = DEBUG_TODAY ?: LocalDate.now()
 /** Max characters for a member's display name. */
 internal const val MAX_NAME_LENGTH = 12
 
+/** Max characters for an event title (firestore.rules `validEvent`; longer writes are rejected). */
+internal const val MAX_EVENT_TITLE = 200
+
 // ── Year fill animation ──
 
 /** How many "days" a single cell takes to fade from transparent to full color. */
@@ -48,9 +51,10 @@ internal const val INTRO_OUT_MS = 700
 // ── Month view selection ring ──
 
 /**
- * Draw the selection ring's glow with GPU blur (Android 12+): one blurred layer
- * per glow step (2 in light mode, 3 in dark mode). Set to `false` to compare with
- * (or fall back to) the blur-mask glow, which Android 11 and below always use.
+ * Draw the selection ring's glow with GPU blur: one blurred layer per glow step
+ * (2 in light mode, 3 in dark mode). Set to `false` to compare it with the older
+ * blur-mask glow (kept only for that comparison; every supported phone, Android 12
+ * and up, can use the GPU glow).
  */
 internal const val USE_GPU_GLOW = true
 

@@ -3,6 +3,7 @@ package io.github.sunken1110.tandemplanner.widget
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.compose.runtime.LaunchedEffect
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -149,10 +150,16 @@ private fun SettingsScreen(
     var level by remember { mutableIntStateOf(initial.level) }
     // A newly picked photo (not saved yet), and the preview image.
     var pickedUri by remember { mutableStateOf<Uri?>(null) }
-    var preview by remember {
-        mutableStateOf(
-            if (initial.background == WidgetBackground.PHOTO) WidgetStyleStore.loadPhoto(context, appWidgetId) else null
-        )
+    var preview by remember { mutableStateOf<Bitmap?>(null) }
+    // The saved photo is read off the main thread, so the screen opens without a stall.
+    LaunchedEffect(Unit) {
+        if (initial.background == WidgetBackground.PHOTO) {
+            val saved = withContext(Dispatchers.IO) {
+                WidgetStyleStore.loadPhoto(context, appWidgetId, initial.photoStamp)
+            }
+            // A photo picked while this was loading wins.
+            if (preview == null) preview = saved
+        }
     }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }

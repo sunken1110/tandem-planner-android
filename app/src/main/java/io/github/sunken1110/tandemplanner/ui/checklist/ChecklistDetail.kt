@@ -38,17 +38,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CoroutineScope
+import io.github.sunken1110.tandemplanner.data.progress
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -79,7 +81,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import io.github.sunken1110.tandemplanner.data.ChecklistItem
 import io.github.sunken1110.tandemplanner.data.ChecklistList
-import io.github.sunken1110.tandemplanner.data.ChecklistProgress
 import io.github.sunken1110.tandemplanner.data.MAX_ITEM_TEXT
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -98,6 +99,7 @@ import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
 import kotlinx.coroutines.delay
@@ -106,16 +108,30 @@ import java.time.LocalDate
 import kotlin.math.abs
 import kotlin.math.sign
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
-
-/** The check pops first; the write (which moves the row) follows after this. */
-private val CHECK_WRITE_DELAY = 200.milliseconds
 
 /** Swiping a row farther than this share of its width deletes it. */
 private const val SWIPE_DELETE_FRACTION = 0.35f
 
-/** While dragging near the top or bottom edge, the list scrolls by this much per move. */
-private const val EDGE_SCROLL_PX = 14f
+/** While dragging near the top or bottom edge, the list scrolls by this much per move (same speed on every screen). */
+private val EDGE_SCROLL = 5.dp
+
+/** How high a picked-up row floats. */
+private val LIFT_SHADOW = 8.dp
+
+/**
+ * The order for an item placed at [index] of [list] (which already shows it
+ * there): halfway between its new neighbors, or one step past the only one.
+ */
+private fun orderAt(list: List<ChecklistItem>, index: Int): Double {
+    val prev = list.getOrNull(index - 1)?.order
+    val next = list.getOrNull(index + 1)?.order
+    return when {
+        prev != null && next != null -> (prev + next) / 2
+        prev != null -> prev + 1.0
+        next != null -> next - 1.0
+        else -> list[index].order
+    }
+}
 
 private const val GESTURE_CANCEL = 0
 private const val GESTURE_TAP = 1
@@ -156,50 +172,68 @@ internal fun ChecklistDetail(
     val reduceMotion = rememberReduceMotion()
     val scope = rememberCoroutineScope()
     val all = checklists.itemsOf(list.id)
-    val progress = ChecklistProgress(all.count { it.done }, all.size)
+    val progress = all.progress()
     val hideDone = checklists.isHidingDone(list.id)
     val nameOf: (String) -> String = { calendar.displayName(it, "상대") }
-    var renaming by remember(list.id) { mutableStateOf(startRenaming) }
+    // Saved, so turning the phone doesn't open the name for editing again.
+    var renaming by rememberSaveable { mutableStateOf(startRenaming) }
     val addFocus = remember { FocusRequester() }
 
-    // ── Celebration when the list becomes complete (not when opening a finished one) ──
+    // ── Celebration when a check (here or on the other phone) finishes the list ──
+    // Not when opening a finished list, and not when deleting the last open item.
     var shineToken by remember { mutableIntStateOf(0) }
     var burstToken by remember { mutableIntStateOf(0) }
-    var wasComplete by remember(list.id) { mutableStateOf(progress.complete) }
-    LaunchedEffect(progress.complete) {
-        if (progress.complete && !wasComplete) {
+    // Also not when "되돌리기" brings back a checked item (that adds to the total too).
+    var lastDone by remember { mutableIntStateOf(progress.done) }
+    var lastTotal by remember { mutableIntStateOf(progress.total) }
+    LaunchedEffect(progress.done, progress.total) {
+        if (progress.complete && progress.done > lastDone && progress.total <= lastTotal) {
             shineToken++
             if (!reduceMotion) burstToken++
             haptics.confirm()
         }
-        wasComplete = progress.complete
+        lastDone = progress.done
+        lastTotal = progress.total
     }
-
-    // ── "민지 보는 중" (re-checked every few seconds, so it goes away on its own) ──
-    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(5.seconds)
-            nowMs = System.currentTimeMillis()
-        }
-    }
-    val viewers = checklists.viewersOf(list.id, nowMs)
 
     // ── Reordering ──
     // While dragging, the open items are shown from this working copy, rearranged
     // as the row passes others; the new order is saved once on release.
+    // Only the order of ids is frozen: the items themselves stay current, so a row
+    // the other member checks or deletes mid-drag leaves the list right away.
     val listState = rememberLazyListState()
+    val edgeScrollPx = with(LocalDensity.current) { EDGE_SCROLL.toPx() }
     var dragId by remember { mutableStateOf<String?>(null) }
-    var working by remember { mutableStateOf<List<ChecklistItem>>(emptyList()) }
+    var workingIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var dragStartTop by remember { mutableFloatStateOf(0f) }
     var dragDistance by remember { mutableFloatStateOf(0f) }
     val openItems = all.filter { !it.done }
-    val todo = if (dragId != null) working else openItems
     val done = all.filter { it.done }
+
+    /**
+     * The open items as shown: in the dragged order while dragging. Read fresh from
+     * state each time, so the drag callbacks never act on a list from an earlier frame.
+     */
+    fun currentTodo(): List<ChecklistItem> {
+        val open = checklists.itemsOf(list.id).filter { !it.done }
+        if (dragId == null) return open
+        val byId = open.associateBy { it.id }
+        // Items added meanwhile go at the end until the drag is over.
+        return workingIds.mapNotNull { byId[it] } + open.filter { it.id !in workingIds }
+    }
+    val todo = currentTodo()
+    // The dragged item was checked or deleted on the other phone: drop the drag.
+    val dragLost = dragId != null && openItems.none { it.id == dragId }
+    LaunchedEffect(dragLost) {
+        if (dragLost) {
+            dragId = null
+            workingIds = emptyList()
+        }
+    }
 
     fun startDrag(item: ChecklistItem) {
         val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == todoKey(item.id) } ?: return
-        working = openItems
+        workingIds = openItems.map { it.id }
         dragStartTop = info.offset.toFloat()
         dragDistance = 0f
         dragId = item.id
@@ -218,47 +252,57 @@ internal fun ChecklistDetail(
             key.startsWith(TODO_PREFIX) && key != info.key && middle >= it.offset && middle <= it.offset + it.size
         }
         if (target != null) {
-            val from = working.indexOfFirst { it.id == id }
-            val to = working.indexOfFirst { todoKey(it.id) == target.key }
+            val from = workingIds.indexOf(id)
+            val to = workingIds.indexOf((target.key as String).removePrefix(TODO_PREFIX))
             if (from >= 0 && to >= 0) {
-                working = working.toMutableList().apply { add(to, removeAt(from)) }
+                workingIds = workingIds.toMutableList().apply { add(to, removeAt(from)) }
                 haptics.tick()
             }
         }
-        // Near an edge: scroll, so the row can travel past what is on screen.
+        // Near an edge: scroll, so the row can travel past what is on screen. Only
+        // while there are open items out of view that way: scrolling further would
+        // carry the dragged row's place off the screen and drop the drag.
+        fun fullyShown(key: String?): Boolean =
+            layout.visibleItemsInfo.firstOrNull { it.key == key }
+                ?.let { it.offset >= layout.viewportStartOffset && it.offset + it.size <= layout.viewportEndOffset }
+                ?: false
+        val shown = currentTodo()
         when {
-            top < layout.viewportStartOffset + info.size / 2 -> listState.dispatchRawDelta(-EDGE_SCROLL_PX)
-            top + info.size > layout.viewportEndOffset - info.size / 2 -> listState.dispatchRawDelta(EDGE_SCROLL_PX)
+            top < layout.viewportStartOffset + info.size / 2 &&
+                !fullyShown(shown.firstOrNull()?.let { todoKey(it.id) }) -> listState.dispatchRawDelta(-edgeScrollPx)
+            top + info.size > layout.viewportEndOffset - info.size / 2 &&
+                !fullyShown(shown.lastOrNull()?.let { todoKey(it.id) }) -> listState.dispatchRawDelta(edgeScrollPx)
         }
     }
 
     fun endDrag() {
         val id = dragId ?: return
-        val index = working.indexOfFirst { it.id == id }
-        val item = working.getOrNull(index)
-        val before = openItems.indexOfFirst { it.id == id }
+        val shown = currentTodo()
+        val index = shown.indexOfFirst { it.id == id }
+        val item = shown.getOrNull(index)
+        val before = checklists.itemsOf(list.id).filter { !it.done }.indexOfFirst { it.id == id }
         if (item != null && index != before) {
-            // Halfway between the new neighbors (or one step past the only one).
-            val prev = working.getOrNull(index - 1)?.order
-            val next = working.getOrNull(index + 1)?.order
-            val order = if (prev != null && next != null) {
-                (prev + next) / 2
-            } else if (prev != null) {
-                prev + 1.0
-            } else if (next != null) {
-                next - 1.0
-            } else {
-                item.order
-            }
-            checklists.move(item, order)
+            checklists.move(item, orderAt(shown, index))
         }
         dragId = null
-        working = emptyList()
+        workingIds = emptyList()
+    }
+
+    /** Moves an open item one place up (-1) or down (+1): TalkBack's way to reorder. */
+    fun moveBy(item: ChecklistItem, step: Int) {
+        val open = checklists.itemsOf(list.id).filter { !it.done }
+        val from = open.indexOfFirst { it.id == item.id }
+        val to = from + step
+        if (from < 0 || to !in open.indices) return
+        val moved = open.toMutableList().apply { add(to, removeAt(from)) }
+        checklists.move(item, orderAt(moved, to))
     }
 
     fun toggle(item: ChecklistItem, toDone: Boolean) {
         val previousBy = item.doneBy
-        checklists.setDone(item, toDone)
+        // Written a moment later (the box pops first), by the checklists themselves,
+        // so it is kept even if this screen goes away meanwhile (e.g. turning the phone).
+        checklists.setDoneLater(item, toDone)
         // Unchecking the other member's check: offer to give it back.
         if (!toDone && previousBy != null && !calendar.isMe(previousBy)) {
             val name = nameOf(previousBy)
@@ -282,7 +326,7 @@ internal fun ChecklistDetail(
                 .padding(start = 4.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = { haptics.tap(); onBack() }) { Text("‹", fontSize = 22.sp) }
+            GlyphButton("‹", "뒤로", onClick = { haptics.tap(); onBack() }, fontSize = 22.sp)
             if (renaming) {
                 NameField(
                     initial = list.title,
@@ -303,12 +347,10 @@ internal fun ChecklistDetail(
                     modifier = Modifier.weight(1f)
                 )
             }
-            viewers.firstOrNull()?.let { uid ->
-                ViewingBadge(nameOf(uid), calendar.colorOf(uid), reduceMotion, Modifier.padding(start = 6.dp))
-            }
+            ViewingNow(checklists, calendar, list.id, reduceMotion, Modifier.padding(start = 6.dp))
             Box {
                 var menu by remember { mutableStateOf(false) }
-                TextButton(onClick = { haptics.tap(); menu = true }) { Text("⋮", fontSize = 20.sp) }
+                GlyphButton("⋮", "더보기", onClick = { haptics.tap(); menu = true })
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("이름 바꾸기") }, onClick = { menu = false; onRename() })
                     DropdownMenuItem(
@@ -323,7 +365,12 @@ internal fun ChecklistDetail(
             }
         }
 
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        // Above the list, so the celebration's pieces fall over the rows, not behind them.
+        Column(
+            Modifier
+                .zIndex(1f)
+                .padding(horizontal = 20.dp)
+        ) {
             // ── Linked event ──
             calendar.events.firstOrNull { it.id == list.eventId }?.let { event ->
                 Text(
@@ -395,8 +442,12 @@ internal fun ChecklistDetail(
                     reduceMotion = reduceMotion,
                     reorderable = true,
                     dragging = dragging,
+                    scope = scope,
                     onToggle = { toggle(item, true) },
                     onDelete = { delete(item) },
+                    // Only the moves that can happen: none up for the first, none down for the last.
+                    onMoveUp = if (todo.firstOrNull()?.id != item.id) ({ moveBy(item, -1) }) else null,
+                    onMoveDown = if (todo.lastOrNull()?.id != item.id) ({ moveBy(item, 1) }) else null,
                     onDragStart = { startDrag(item) },
                     onDrag = ::dragBy,
                     onDragEnd = ::endDrag,
@@ -448,8 +499,11 @@ internal fun ChecklistDetail(
                         reduceMotion = reduceMotion,
                         reorderable = false,
                         dragging = false,
+                        scope = scope,
                         onToggle = { toggle(item, false) },
                         onDelete = { delete(item) },
+                        onMoveUp = null,
+                        onMoveDown = null,
                         onDragStart = {},
                         onDrag = {},
                         onDragEnd = {},
@@ -489,7 +543,9 @@ internal fun ChecklistDetail(
  */
 @Composable
 private fun NameField(initial: String, onDone: (String) -> Unit, modifier: Modifier = Modifier) {
-    var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
+    var value by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
+    }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     var focusedOnce by remember { mutableStateOf(false) }
@@ -551,6 +607,12 @@ private fun Modifier.rowAnimation(scope: LazyItemScope): Modifier = with(scope) 
  * One item: a round check box, the text, and (for checked items) who checked it.
  * Gestures are told apart by hand, so a tap, a sideways swipe, a long press and
  * a normal list scroll don't trip over each other.
+ *
+ * @param scope the list's scope, for work that must finish even if this row
+ *        leaves the screen meanwhile (the end of a swipe, which then deletes):
+ *        the row's own scope would be cancelled with it. The delayed check write
+ *        lives longer still, in [SharedChecklists.setDoneLater].
+ * @param onMoveUp / [onMoveDown] TalkBack's way to reorder (null for checked items).
  */
 @Composable
 private fun ChecklistRow(
@@ -562,15 +624,18 @@ private fun ChecklistRow(
     reduceMotion: Boolean,
     reorderable: Boolean,
     dragging: Boolean,
+    scope: CoroutineScope,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val haptics = rememberHaptics()
-    val scope = rememberCoroutineScope()
+    val rowScope = rememberCoroutineScope()
 
     // The box shows the new state at once; the write follows after the pop.
     var shownDone by remember(item.id, item.done) { mutableStateOf(item.done) }
@@ -582,15 +647,13 @@ private fun ChecklistRow(
         shownDone = !item.done
         haptics.tick()
         if (!reduceMotion) {
-            scope.launch {
+            rowScope.launch {
                 pop.animateTo(1.28f, tween(90))
                 pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 600f))
             }
         }
-        scope.launch {
-            delay(CHECK_WRITE_DELAY)
-            onToggle()
-        }
+        // The write waits for the pop in SharedChecklists.setDoneLater.
+        onToggle()
     }
 
     // ── The other member's change: a light sweeps across the row ──
@@ -609,6 +672,8 @@ private fun ChecklistRow(
 
     val currentTap by rememberUpdatedState(::tap)
     val currentDelete by rememberUpdatedState(onDelete)
+    val currentMoveUp by rememberUpdatedState(onMoveUp)
+    val currentMoveDown by rememberUpdatedState(onMoveDown)
     val currentDragStart by rememberUpdatedState(onDragStart)
     val currentDrag by rememberUpdatedState(onDrag)
     val currentDragEnd by rememberUpdatedState(onDragEnd)
@@ -638,12 +703,16 @@ private fun ChecklistRow(
         Row(
             Modifier
                 .fillMaxWidth()
+                // Lift and shadow are read here, while drawing, so picking a row up
+                // doesn't recompose it every frame.
                 .graphicsLayer {
                     translationX = swipeX
                     scaleX = 1f + 0.02f * lift
                     scaleY = 1f + 0.02f * lift
+                    shadowElevation = LIFT_SHADOW.toPx() * lift
+                    shape = ROW_SHAPE
+                    clip = false
                 }
-                .shadow((8 * lift).dp, ROW_SHAPE, clip = false)
                 .clip(ROW_SHAPE)
                 .background(surface.copy(alpha = if (dragging) 1f else 0.9f))
                 .drawBehind {
@@ -702,7 +771,11 @@ private fun ChecklistRow(
                     role = Role.Checkbox
                     stateDescription = if (shownDone) "완료" else "미완료"
                     onClick(label = if (shownDone) "체크 해제" else "체크") { currentTap(); true }
-                    customActions = listOf(CustomAccessibilityAction("삭제") { currentDelete(); true })
+                    customActions = buildList {
+                        add(CustomAccessibilityAction("삭제") { currentDelete(); true })
+                        currentMoveUp?.let { up -> add(CustomAccessibilityAction("위로 이동") { up(); true }) }
+                        currentMoveDown?.let { down -> add(CustomAccessibilityAction("아래로 이동") { down(); true }) }
+                    }
                 }
                 .padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically

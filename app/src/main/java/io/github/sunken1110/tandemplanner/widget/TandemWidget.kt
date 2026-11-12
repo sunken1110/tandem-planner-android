@@ -15,7 +15,6 @@ import androidx.glance.semantics.contentDescription
 import androidx.glance.ColorFilter
 import androidx.glance.ImageProvider
 import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.glance.LocalState
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -119,23 +118,25 @@ open class TandemWidget : GlanceAppWidget() {
             // Read on every redraw, so an update shows the latest saved events and
             // settings, and "today" is always the real today.
             val ctx = LocalContext.current
-            // Glance only redraws a running widget when its own state changes, so every
-            // refresh bumps this stamp (see WidgetUpdater.refresh); reading it here ties
-            // the drawing to it. Without it, new settings or events showed only later.
+            // Each refresh saves a new stamp in the widget's state (WidgetUpdater.refresh);
+            // the drawing reports it back (below), so the settings screen can tell when
+            // its change is on the home screen.
             val stamp = (LocalState.current as? Preferences)?.get(RefreshStamp) ?: 0L
             val state = remember(stamp) { WidgetStore.load(ctx) }
             val style = remember(stamp) { WidgetStyleStore.load(ctx, appWidgetId) }
-            // The photo is decoded only when a new one was saved.
-            val source = remember(appWidgetId, style.background, style.photoStamp) {
-                if (style.background == WidgetBackground.PHOTO) WidgetStyleStore.loadPhoto(ctx, appWidgetId) else null
-            }
-            // Cut to this widget's actual shape around the chosen spot; again after a resize.
+            // Decoded once per saved photo and kept (WidgetStyleStore.loadPhoto): every
+            // refresh draws the widget from scratch, so remember{} alone wouldn't keep it.
+            val source = if (style.background == WidgetBackground.PHOTO) {
+                WidgetStyleStore.loadPhoto(ctx, appWidgetId, style.photoStamp)
+            } else null
+            // Cut to the shape being drawn (each orientation, or a foldable's screens,
+            // is drawn at its own exact size), around the chosen spot, and no larger
+            // in pixels than the widget itself.
             val size = LocalSize.current
-            val aspect = WidgetStyleStore.widgetAspect(LocalAppWidgetOptions.current)
-                ?: (size.width.value / size.height.value.coerceAtLeast(1f))
-            val photo = remember(source, aspect, style.focusX, style.focusY, style.zoom) {
-                source?.let { runCatching { PhotoCrop.crop(it, aspect, style) }.getOrNull() }
-            }
+            val aspect = size.width.value / size.height.value.coerceAtLeast(1f)
+            val maxSide = (maxOf(size.width.value, size.height.value) * ctx.resources.displayMetrics.density)
+                .toInt().coerceIn(MIN_PHOTO_PX, MAX_PHOTO_PX)
+            val photo = source?.let { runCatching { PhotoCrop.crop(it, aspect, style, maxSide) }.getOrNull() }
             WidgetContent(state, style, photo, LocalDate.now(), LocalTime.now())
             // Tell the settings screen this refresh has been drawn.
             SideEffect { WidgetStyleStore.markRendered(ctx, appWidgetId, stamp) }
@@ -143,17 +144,13 @@ open class TandemWidget : GlanceAppWidget() {
     }
 
     companion object {
-        /** 1×1. */
-        val TILE = DpSize(40.dp, 40.dp)
-        /** 2×1. */
+        /** Narrower than a 2×1 card: the 1×1 tile. */
         val CARD = DpSize(110.dp, 40.dp)
-        /** 4×1: same card, long dates. */
+        /** 4 columns or wider: long dates, and a time column in the list. */
         val CARD_WIDE = DpSize(250.dp, 40.dp)
-        /** 2×2. */
-        val LIST = DpSize(110.dp, 110.dp)
-        /** 4×2: same list, long dates and separate time column. */
-        val LIST_WIDE = DpSize(250.dp, 110.dp)
-
+        /** Bounds for the photo's long side in pixels: sharp enough, and small for Android's widget limits. */
+        private const val MIN_PHOTO_PX = 160
+        private const val MAX_PHOTO_PX = 640
     }
 }
 
@@ -287,6 +284,7 @@ private fun WidgetContent(state: WidgetState, style: WidgetStyle, photo: Bitmap?
     val upcoming = state.items.map { it.event }.upcoming(today, now).mapNotNull { byId[it.id] }
     val next = upcoming.firstOrNull()
     val wide = size.width >= TandemWidget.CARD_WIDE.width
+    val fontScale = LocalContext.current.resources.configuration.fontScale.coerceAtLeast(1f)
     val tile = size.width < TandemWidget.CARD.width
 
     // 1×1 with an event on the season background: the tile itself is the D-day badge.
@@ -309,7 +307,10 @@ private fun WidgetContent(state: WidgetState, style: WidgetStyle, photo: Bitmap?
             contentAlignment = if (tile) Alignment.Center else Alignment.CenterStart
         ) {
         when {
+            // 1×1: one short line (two lines don't fit in a tile).
+            !state.linked && tile -> TileMessage("연결 필요", colors)
             !state.linked -> Message("달력 연결 필요", "앱에서 달력을 만들거나 참여해요", colors)
+            next == null && tile -> TileMessage("일정 없음", colors)
             next == null -> {
                 val left = ChronoUnit.DAYS.between(today, seasonEnd(today))
                 Message(
@@ -320,14 +321,14 @@ private fun WidgetContent(state: WidgetState, style: WidgetStyle, photo: Bitmap?
             }
             // 1×1 on a photo or see-through backdrop: the D-day pill over it.
             tile -> PillTile(next, today, colors)
-            size.height < TandemWidget.LIST.height -> Card(next, today, wide, colors)
+            // Too short for the card, divider and "+" (at this font size): the card alone.
+            !listFits(size.height, fontScale) -> Card(next, today, wide, colors)
             else -> Column(GlanceModifier.fillMaxSize()) {
                 Card(next, today, wide, colors)
                 Spacer(GlanceModifier.height(8.dp))
                 Box(GlanceModifier.fillMaxWidth().height(1.dp).background(colors.divider)) {}
                 Spacer(GlanceModifier.height(4.dp))
-                val scale = LocalContext.current.resources.configuration.fontScale.coerceAtLeast(1f)
-                val shown = upcoming.drop(1).take(listRows(size.height, scale))
+                val shown = upcoming.drop(1).take(listRows(size.height, fontScale))
                 // Rows only where they fit: a very short widget shows the card and "+".
                 // One day-column width for every row, so the dots and titles line up:
                 // wider when any row shows today's time in it (narrow widgets only).
@@ -534,9 +535,23 @@ private fun showsTimeAsDay(e: Event, today: LocalDate): Boolean =
  * Depends on the height only, so widgets of the same height show the same
  * number of events.
  */
-private fun listRows(height: Dp, scale: Float): Int {
-    val fixed = 20.dp + (SMALL_LINE * 2 + TITLE_LINE) * scale + 13.dp + 28.dp + SAFETY_MARGIN
-    return ((height - fixed) / (ROW_HEIGHT * scale)).toInt().coerceAtLeast(0)
+private fun listRows(height: Dp, scale: Float): Int =
+    ((height - listChrome(scale) - SAFETY_MARGIN) / (ROW_HEIGHT * scale)).toInt().coerceAtLeast(0)
+
+/** Everything in the list layout but the rows: padding, the card, the divider and "+". */
+private fun listChrome(scale: Float): Dp = 20.dp + (SMALL_LINE * 2 + TITLE_LINE) * scale + 13.dp + 28.dp
+
+/**
+ * The list layout fits: room for its card and "+" (rows are added as the height
+ * allows). Keeps the same [SAFETY_MARGIN] as [listRows], so a launcher reporting a
+ * little more height than it shows can't push the "+" out of sight.
+ */
+private fun listFits(height: Dp, scale: Float): Boolean = height >= listChrome(scale) + SAFETY_MARGIN
+
+/** A 1×1 tile's status ("연결 필요", "일정 없음"): one centered line. */
+@Composable
+private fun TileMessage(text: String, colors: WidgetColors) {
+    Text(text, style = textStyle(colors.text, 11.sp, FontWeight.Medium), maxLines = 1)
 }
 
 /**

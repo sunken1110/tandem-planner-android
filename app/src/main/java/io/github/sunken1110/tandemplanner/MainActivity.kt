@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -18,14 +19,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.ui.calendar.LaunchRequest
 import io.github.sunken1110.tandemplanner.widget.WidgetExtras
 import java.time.LocalDate
@@ -41,6 +40,9 @@ import io.github.sunken1110.tandemplanner.ui.theme.TandemPlannerTheme
  * shared calendar) or the main calendar screen.
  */
 class MainActivity : ComponentActivity() {
+
+    /** The calendar and checklists, kept across Activity recreation (see [AppState]). */
+    private val appState: AppState by viewModels()
 
     /**
      * What a home-screen widget tap asked for (a day to open, or quick add).
@@ -103,7 +105,7 @@ class MainActivity : ComponentActivity() {
                 )
 
                 // One shared-calendar repository for the whole app.
-                val calendar = remember { SharedCalendar(applicationContext) }
+                val calendar = appState.calendar
 
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize()) {
@@ -117,6 +119,7 @@ class MainActivity : ComponentActivity() {
                                     // The year fill animation waits until the intro is gone.
                                     CalendarScreen(
                                         calendar = calendar,
+                                        checklists = appState.checklists,
                                         startFill = !showIntro,
                                         launchRequest = launchRequest,
                                         onLaunchHandled = { launchRequest = null }

@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.sunken1110.tandemplanner.MAX_EVENT_TITLE
+import io.github.sunken1110.tandemplanner.currentDate
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.Blob
@@ -24,14 +26,15 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.LocalDate
 import kotlin.random.asKotlinRandom
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** Awaits a Play Services [Task] from a coroutine. */
+/** Awaits a Play Services [Task] from a coroutine (a cancelled task cancels the wait). */
 private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine { cont ->
     addOnSuccessListener { cont.resume(it) }
     addOnFailureListener { cont.resumeWithException(it) }
+    addOnCanceledListener { cont.cancel() }
 }
 
 /**
@@ -109,7 +112,7 @@ class SharedCalendar(context: Context) {
 
     /** Waits for a Firestore write to finish, with a timeout. Returns false and reports an error if it doesn't. */
     private suspend fun <T> Task<T>.awaitOnline(): Boolean {
-        val done = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { awaitResult(); true } != null
+        val done = withTimeoutOrNull(NETWORK_TIMEOUT) { awaitResult(); true } != null
         if (!done) reportError(MSG_OFFLINE)
         return done
     }
@@ -141,7 +144,7 @@ class SharedCalendar(context: Context) {
     private suspend fun ensureSignedIn(): Boolean {
         auth.currentUser?.let { uid = it.uid; return true }
         return try {
-            val result = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { auth.signInAnonymously().awaitResult() }
+            val result = withTimeoutOrNull(NETWORK_TIMEOUT) { auth.signInAnonymously().awaitResult() }
             uid = result?.user?.uid
             if (result == null) reportError(MSG_OFFLINE)
             uid != null
@@ -218,7 +221,7 @@ class SharedCalendar(context: Context) {
                 saveRoom(code, name)
                 // Usually seat 1; read it to be sure (e.g. rejoining with the same account).
                 val seat = runCatching {
-                    withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get(Source.SERVER).awaitResult() }
+                    withTimeoutOrNull(NETWORK_TIMEOUT) { room(code).get(Source.SERVER).awaitResult() }
                         ?.let { (it.get("members") as? List<*>)?.indexOf(me) }
                 }.getOrNull()?.takeIf { it >= 0 } ?: 1
                 saveRecoveryCode(seat, secret)
@@ -323,7 +326,7 @@ class SharedCalendar(context: Context) {
 
         return try {
             // 2. Take over the seat.
-            val snap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get(Source.SERVER).awaitResult() }
+            val snap = withTimeoutOrNull(NETWORK_TIMEOUT) { room(code).get(Source.SERVER).awaitResult() }
                 ?: run { reportError(MSG_OFFLINE); return false }
             val roomMembers = (snap.get("members") as? List<*>).orEmpty().filterIsInstance<String>()
             val old = roomMembers.getOrNull(seat) ?: run { reportError(MSG_RECOVER_FAILED); return false }
@@ -402,18 +405,27 @@ class SharedCalendar(context: Context) {
     /**
      * Reads the room and its events once, without listening. Used in the background
      * (the home-screen widget's hourly refresh), where no screen keeps listeners open.
-     * Returns false when there is no room, no sign-in, or the server can't be reached.
+     * Only events that can still matter to the widget are read: those starting on or
+     * after [MAX_EVENT_DAYS] days ago (a trip that started earlier is already over),
+     * so an hourly refresh doesn't re-read the whole history.
+     * Returns false when there is no room or sign-in, the room is gone, or a read
+     * doesn't finish within the timeout. Offline, Firestore usually answers from its
+     * cache instead, and then this returns true with the cached (possibly old) events;
+     * the hourly job only runs with a connection, so that is rare.
      */
     suspend fun refreshOnce(): Boolean {
         val code = roomCode ?: return false
         auth.currentUser ?: return false
         return try {
-            val roomSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) { room(code).get().awaitResult() }
+            val roomSnap = withTimeoutOrNull(NETWORK_TIMEOUT) { room(code).get().awaitResult() }
                 ?: return false
             if (!roomSnap.exists()) return false
             applyRoom(roomSnap)
-            val eventsSnap = withTimeoutOrNull(NETWORK_TIMEOUT_MS.milliseconds) {
-                room(code).collection("events").get().awaitResult()
+            val eventsSnap = withTimeoutOrNull(NETWORK_TIMEOUT) {
+                room(code).collection("events")
+                    .whereGreaterThanOrEqualTo("date", currentDate().minusDays(MAX_EVENT_DAYS.toLong()).toString())
+                    .get()
+                    .awaitResult()
             } ?: return false
             val list = eventsSnap.documents.mapNotNull(::parseEvent)
             events.clear()
@@ -490,7 +502,7 @@ class SharedCalendar(context: Context) {
         val data = mutableMapOf(
             "date" to date.toString(),
             "time" to if (end != null) "" else time,
-            "title" to title,
+            "title" to title.fitTitle(),
             "authorUid" to me,
             "authorName" to myName,
             "createdAt" to FieldValue.serverTimestamp()
@@ -519,11 +531,12 @@ class SharedCalendar(context: Context) {
         val me = uid ?: return
         val end = endDate?.takeIf { it.isAfter(date) }
         val storedTime = if (end != null) "" else time
-        val next = EventSnapshot(date, storedTime, title, end)
+        val name = title.fitTitle()
+        val next = EventSnapshot(date, storedTime, name, end)
         val updates = mutableMapOf(
             "date" to date.toString(),
             "time" to storedTime,
-            "title" to title,
+            "title" to name,
             // Becoming a one-day event removes the field instead of storing a null.
             "endDate" to (end?.toString() ?: FieldValue.delete()),
             "updatedAt" to FieldValue.serverTimestamp()
@@ -609,8 +622,12 @@ class SharedCalendar(context: Context) {
     private fun String.parseEndDate(after: LocalDate): LocalDate? =
         runCatching { LocalDate.parse(this) }.getOrNull()?.takeIf { it.isAfter(after) }
 
+    /** A title the security rules accept: trimmed, at most [MAX_EVENT_TITLE] characters. */
+    private fun String.fitTitle(): String = trim().takeWhole(MAX_EVENT_TITLE)
+
+    /** A new room code. Knowing it is enough to join a room with one member, so it's unguessable. */
     private fun randomCode(): String =
-        (1..CODE_LENGTH).map { CODE_CHARS.random() }.joinToString("")
+        (1..CODE_LENGTH).map { CODE_CHARS.random(secureRandom) }.joinToString("")
 
     /** A new random recovery secret (12 characters from [CODE_CHARS], ~59 bits). */
     private fun newRecoverySecret(): String =
@@ -639,7 +656,7 @@ class SharedCalendar(context: Context) {
 
         /** Excludes look-alike characters (0/O, 1/I/L). */
         private const val CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-        private const val NETWORK_TIMEOUT_MS = 15_000L
+        private val NETWORK_TIMEOUT = 15.seconds
         private const val CREATE_ATTEMPTS = 3
 
         private const val KEY_ROOM = "room"

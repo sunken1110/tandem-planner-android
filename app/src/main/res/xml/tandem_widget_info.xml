@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Home-screen widget definition (D-day card).
+  Home-screen widget definition (2×1 next-event card).
   2x1 card entry. Resizable from 1x1 up to about 4x3; content adapts to the size
   (see TandemWidget.kt). updatePeriodMillis is 0: refreshes are scheduled by the app
   (WorkManager) instead of the system's 30-minute minimum timer.

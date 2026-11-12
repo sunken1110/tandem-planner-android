@@ -282,7 +282,7 @@ fun eventWhenText(event: Event, today: LocalDate): String {
             val day = when (daysUntil) {
                 0L -> "오늘"
                 1L -> "내일"
-                else -> "${event.date.monthValue}월 ${event.date.dayOfMonth}일 (${event.date.dayOfWeek.koreanShort()})"
+                else -> event.date.koreanDayLabel()
             }
             day + " · " + if (event.time.isBlank()) "하루 종일" else displayTime(event.time)
         }

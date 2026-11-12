@@ -31,6 +31,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.delay
+import io.github.sunken1110.tandemplanner.ui.common.colorOf
+import io.github.sunken1110.tandemplanner.data.SharedChecklists
+import io.github.sunken1110.tandemplanner.data.SharedCalendar
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -236,8 +243,9 @@ fun CelebrationBurst(token: Int, season: Season, modifier: Modifier = Modifier) 
 /** "민지 보는 중" with a softly breathing dot in their color. */
 @Composable
 fun ViewingBadge(name: String, color: Color, reduceMotion: Boolean, modifier: Modifier = Modifier) {
-    val breath = if (reduceMotion) {
-        1f
+    // Read only while drawing the dot (below), so breathing doesn't recompose the badge.
+    val breathing = if (reduceMotion) {
+        null
     } else {
         val transition = rememberInfiniteTransition(label = "viewing")
         transition.animateFloat(
@@ -245,7 +253,7 @@ fun ViewingBadge(name: String, color: Color, reduceMotion: Boolean, modifier: Mo
             targetValue = 1f,
             animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
             label = "breath"
-        ).value
+        )
     }
     Row(
         modifier
@@ -258,6 +266,7 @@ fun ViewingBadge(name: String, color: Color, reduceMotion: Boolean, modifier: Mo
             Modifier
                 .size(7.dp)
                 .graphicsLayer {
+                    val breath = breathing?.value ?: 1f
                     alpha = breath
                     scaleX = 0.8f + 0.2f * breath
                     scaleY = 0.8f + 0.2f * breath
@@ -269,6 +278,33 @@ fun ViewingBadge(name: String, color: Color, reduceMotion: Boolean, modifier: Mo
         Text("$name 보는 중", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = color, maxLines = 1)
     }
 }
+
+/**
+ * "민지 보는 중" for [listId] when the other member has it open; nothing otherwise.
+ * Re-checks the presence notes every few seconds on its own, so a closed app's
+ * note expires; only this badge redraws then, not the screen around it.
+ */
+@Composable
+fun ViewingNow(
+    checklists: SharedChecklists,
+    calendar: SharedCalendar,
+    listId: String,
+    reduceMotion: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(PRESENCE_RECHECK)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val viewer = checklists.viewersOf(listId, nowMs).firstOrNull() ?: return
+    ViewingBadge(calendar.displayName(viewer, "상대"), calendar.colorOf(viewer), reduceMotion, modifier)
+}
+
+/** How often "보는 중" is re-checked against the clock. */
+private val PRESENCE_RECHECK = 5.seconds
 
 /**
  * A short message at the bottom of the sheet, optionally with an action

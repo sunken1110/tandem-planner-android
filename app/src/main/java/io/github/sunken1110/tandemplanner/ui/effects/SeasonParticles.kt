@@ -61,7 +61,11 @@ fun SeasonParticles(season: Season, dark: Boolean) {
     }
 
     val time = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
+    // With the system's animations off, the particles stay where they start (a
+    // still frame): this frame-by-frame loop isn't slowed down by that setting.
+    val reduceMotion = rememberReduceMotion()
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) return@LaunchedEffect
         val start = withFrameNanos { it }
         while (true) {
             withFrameNanos { time.floatValue = (it - start) / 1_000_000_000f }

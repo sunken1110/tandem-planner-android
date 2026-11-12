@@ -2,6 +2,7 @@ package io.github.sunken1110.tandemplanner.data
 
 import java.time.LocalDate
 import java.time.LocalTime
+import java.util.Locale
 import java.time.temporal.ChronoUnit
 
 /**
@@ -75,7 +76,7 @@ data class EventSnapshot(
  * - today's timed events whose time ([now]) has passed are left out.
  */
 fun Collection<Event>.upcoming(today: LocalDate, now: LocalTime): List<Event> {
-    val nowStored = "%02d:%02d".format(now.hour, now.minute)
+    val nowStored = String.format(Locale.ROOT, "%02d:%02d", now.hour, now.minute)
     return filter { e ->
         when {
             e.lastDate.isBefore(today) -> false
@@ -94,6 +95,17 @@ fun Collection<Event>.nextUpcoming(today: LocalDate, now: LocalTime): Event? = u
 
 /** Longest multi-day event the editor allows, in days. */
 const val MAX_EVENT_DAYS = 60
+
+/**
+ * The first [max] chars, like [take], but never half an emoji: when the cut
+ * falls between the two halves of a surrogate pair, the lone first half is
+ * dropped too (it would show as a broken character).
+ */
+fun String.takeWhole(max: Int): String {
+    if (length <= max) return this
+    val cut = take(max)
+    return if (cut.lastOrNull()?.isHighSurrogate() == true) cut.dropLast(1) else cut
+}
 
 /**
  * Events in display order: multi-day events first (earlier start, then longer
