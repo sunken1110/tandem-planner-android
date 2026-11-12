@@ -408,8 +408,10 @@ class SharedCalendar(context: Context) {
      * Only events that can still matter to the widget are read: those starting on or
      * after [MAX_EVENT_DAYS] days ago (a trip that started earlier is already over),
      * so an hourly refresh doesn't re-read the whole history.
-     * Returns false when there is no room or sign-in, or nothing could be read in time
-     * (offline, Firestore answers from its cache instead).
+     * Returns false when there is no room or sign-in, the room is gone, or a read
+     * doesn't finish within the timeout. Offline, Firestore usually answers from its
+     * cache instead, and then this returns true with the cached (possibly old) events;
+     * the hourly job only runs with a connection, so that is rare.
      */
     suspend fun refreshOnce(): Boolean {
         val code = roomCode ?: return false
