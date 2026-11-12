@@ -61,7 +61,7 @@ Reasons and history: `docs/handoff.md`, section 4.
 - Glance draws at most 10 children per Row/Column/Box and silently drops the rest → group them in nested Columns of 10.
 - `SubcomposeLayout` under `IntrinsicSize.Min` crashes → use a plain `Layout`.
 - `SharedChecklists.stop()` is also called on screen rotation → never clear data in `stop()`.
-- Deferred writes (check-then-move, swipe delete) run in the parent list's scope, not the row's.
+- Deferred writes never run in the row's scope: the delayed check goes through `SharedChecklists.setDoneLater` (flushed by `stop()`), and the swipe-delete animation runs in the parent list's scope.
 - Read animated values only in the draw phase or inside `graphicsLayer {}`; derive values with `derivedStateOf`.
 - Times are always "오후 3:00", untimed events "하루 종일", dates via `koreanDayLabel()`.
 

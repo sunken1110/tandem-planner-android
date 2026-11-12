@@ -27,6 +27,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /** Longest list title, in characters (also checked by the Firestore rules). */
@@ -179,6 +180,9 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     private val pendingDeletes = mutableStateListOf<String>()
     private val deleteJobs = HashMap<String, Job>()
 
+    /** Checks waiting out [CHECK_WRITE_DELAY] ([setDoneLater]): item id → the job and its write. */
+    private val doneJobs = HashMap<String, Pair<Job, () -> Unit>>()
+
     /**
      * Item id → when ([SystemClock.elapsedRealtime]) the other member last changed
      * it. The row glows briefly when this is recent.
@@ -254,8 +258,10 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
         }
     }
 
-    /** Stops listening. Deletes still waiting for "되돌리기" are carried out now. */
+    /** Stops listening. Checks and deletes still waiting are carried out now. */
     fun stop() {
+        // Before the scope goes: turning the phone right after a check must not lose it.
+        doneJobs.keys.toList().forEach(::commitDone)
         deleteJobs.keys.toList().forEach(::commitDelete)
         if (viewing != null) writePresence("")
         viewing = null
@@ -522,6 +528,27 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
         ).addOnFailureListener { report("체크를 저장하지 못했어요.") }
     }
 
+    /**
+     * [setDone] after [CHECK_WRITE_DELAY], so the check box can pop before the row
+     * moves. Runs here, not in the screen's scope: the write survives the row, the
+     * list or the whole screen going away meanwhile ([stop] carries it out at once).
+     */
+    fun setDoneLater(item: ChecklistItem, done: Boolean) {
+        doneJobs.remove(item.id)?.first?.cancel()
+        val write = { setDone(item, done) }
+        val job = scope?.launch {
+            delay(CHECK_WRITE_DELAY)
+            commitDone(item.id)
+        } ?: return write()
+        doneJobs[item.id] = job to write
+    }
+
+    private fun commitDone(itemId: String) {
+        val (job, write) = doneJobs.remove(itemId) ?: return
+        job.cancel()
+        write()
+    }
+
     /** Moves an item to a new place ([order] between its new neighbors). */
     fun move(item: ChecklistItem, order: Double) {
         val code = roomCode ?: return
@@ -601,6 +628,9 @@ class SharedChecklists(private val calendar: SharedCalendar, context: Context) {
     companion object {
         /** How long a deleted item can still be brought back. */
         val UNDO_WINDOW = 4.seconds
+
+        /** A check is written this long after the tap: the box pops first, then the row moves. */
+        val CHECK_WRITE_DELAY = 200.milliseconds
 
         /** How often an open list tells the other phone "보는 중". */
         private val HEARTBEAT = 20.seconds

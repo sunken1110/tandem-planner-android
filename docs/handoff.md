@@ -95,7 +95,9 @@ tandemplanner/
    - 짧은 주기 타이머는 필요한 작은 컴포저블 안에 가둔다(예: `ViewingNow`).
 4. `SharedChecklists.stop()`은 **회전할 때도 호출된다.** 그래서 stop에서 데이터를 지우면 안 된다. 방 코드가 바뀔 때만 `start()`에서 지운다.
 5. 드래그 중에는 **id 순서만** 고정한다(`workingIds`). 내용은 실시간 상태에서 다시 읽는다(`currentTodo()`). 옮기던 항목이 사라지면 드래그를 끝낸다.
-6. 지연 쓰기(체크 후 이동, 스와이프 삭제)는 줄의 scope가 아니라 **부모 목록의 scope**에서 실행한다. 줄이 화면에서 사라져도 쓰기가 유지되게 하려는 것이다.
+6. 지연 쓰기는 줄의 scope에서 실행하지 않는다. 줄이 화면에서 사라져도 쓰기가 유지되게 하려는 것이다.
+   - 체크 후 이동(200ms 대기)은 `SharedChecklists.setDoneLater`가 자기 scope에서 실행한다. 화면 회전으로 `stop()`이 불리면 남은 체크를 즉시 저장한다. 그래서 체크리스트 화면 자체가 사라져도 저장된다.
+   - 스와이프 삭제는 끝나는 애니메이션이 화면의 프레임 시계를 써야 해서 **부모 목록의 scope**에서 실행한다. 실제 삭제는 `deleteItemLater`(SharedChecklists)가 맡는다.
 7. "보는 중" 신호는 `LifecycleStartEffect`로 앱이 백그라운드로 가면 멈춘다.
 8. 접근성: 기호 버튼은 `GlyphButton`으로 설명을 붙인다. 오도미터, 연 카드, 배지는 `clearAndSetSemantics`로 한 문장만 읽게 한다.
 

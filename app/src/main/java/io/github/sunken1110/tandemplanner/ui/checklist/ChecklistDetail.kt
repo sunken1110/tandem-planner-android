@@ -110,9 +110,6 @@ import kotlin.math.abs
 import kotlin.math.sign
 import kotlin.time.Duration.Companion.milliseconds
 
-/** The check pops first; the write (which moves the row) follows after this. */
-private val CHECK_WRITE_DELAY = 200.milliseconds
-
 /** Swiping a row farther than this share of its width deletes it. */
 private const val SWIPE_DELETE_FRACTION = 0.35f
 
@@ -304,7 +301,9 @@ internal fun ChecklistDetail(
 
     fun toggle(item: ChecklistItem, toDone: Boolean) {
         val previousBy = item.doneBy
-        checklists.setDone(item, toDone)
+        // Written a moment later (the box pops first), by the checklists themselves,
+        // so it is kept even if this screen goes away meanwhile (e.g. turning the phone).
+        checklists.setDoneLater(item, toDone)
         // Unchecking the other member's check: offer to give it back.
         if (!toDone && previousBy != null && !calendar.isMe(previousBy)) {
             val name = nameOf(previousBy)
@@ -616,8 +615,9 @@ private fun Modifier.rowAnimation(scope: LazyItemScope): Modifier = with(scope) 
  * a normal list scroll don't trip over each other.
  *
  * @param scope the list's scope, for work that must finish even if this row
- *        leaves the screen meanwhile (the delayed check, the end of a swipe):
- *        the row's own scope would be cancelled with it, and the check lost.
+ *        leaves the screen meanwhile (the end of a swipe, which then deletes):
+ *        the row's own scope would be cancelled with it. The delayed check write
+ *        lives longer still, in [SharedChecklists.setDoneLater].
  * @param onMoveUp / [onMoveDown] TalkBack's way to reorder (null for checked items).
  */
 @Composable
@@ -658,11 +658,8 @@ private fun ChecklistRow(
                 pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 600f))
             }
         }
-        val toggle = onToggle
-        scope.launch {
-            delay(CHECK_WRITE_DELAY)
-            toggle()
-        }
+        // The write waits for the pop in SharedChecklists.setDoneLater.
+        onToggle()
     }
 
     // ── The other member's change: a light sweeps across the row ──
