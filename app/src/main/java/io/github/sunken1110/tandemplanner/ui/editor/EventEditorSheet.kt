@@ -45,6 +45,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,6 +109,9 @@ private fun LocalDate.labelColor(): Color? =
  * controls are hidden while it is selected; the time chosen before is kept and
  * comes back when switching back to "하루".
  *
+ * ‹ › nudge a date by one day; tapping the date itself opens a month grid
+ * ([InlineDatePicker]) right below it, to move the event to any day.
+ *
  * @param history past events used to suggest a time for similar titles (see [TimeRecall]).
  * @param saveLabel text on the confirm button.
  * @param checklists the checklists already linked to the event being edited.
@@ -139,6 +146,16 @@ fun EventEditorSheet(
         date = date.plusDays(days)
         endDate = endDate?.plusDays(days)
     }
+    // Which date's month grid is open; at most one at a time.
+    var picking by remember { mutableStateOf<DatePart?>(null) }
+    val focusManager = LocalFocusManager.current
+    fun togglePicker(part: DatePart) {
+        picking = if (picking == part) null else part
+        // Drop the title's focus (and the keyboard) so the grid isn't hidden under it.
+        if (picking != null) focusManager.clearFocus()
+    }
+    // The last-day grid has nothing to edit once the event is a single day again.
+    LaunchedEffect(multiDay) { if (!multiDay && picking == DatePart.END) picking = null }
     var time by remember { mutableStateOf(initial.time) }
     // A legacy free-form time ("저녁쯤"), kept until the user picks a time themselves.
     var rawTime by remember { mutableStateOf(initial.rawTime) }
@@ -179,18 +196,29 @@ fun EventEditorSheet(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 20.dp)
         ) {
-            // ── Date (stepper, so parsed dates can be nudged) ──
+            // ── Date (stepper to nudge; tap the label for a month grid) ──
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GlyphButton("‹", "하루 전", onClick = { haptics.tap(); shiftStart(-1) })
-                Text(
-                    if (multiDay) "${date.koreanLabel()} 부터" else date.koreanLabel(),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
+                DateLabel(
+                    text = if (multiDay) "${date.koreanLabel()} 부터" else date.koreanLabel(),
                     color = date.labelColor() ?: MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center
+                    open = picking == DatePart.START,
+                    onClick = { haptics.tap(); togglePicker(DatePart.START) },
+                    modifier = Modifier.weight(1f)
                 )
                 GlyphButton("›", "하루 뒤", onClick = { haptics.tap(); shiftStart(1) })
+            }
+            AnimatedVisibility(
+                visible = picking == DatePart.START,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                InlineDatePicker(
+                    selected = date,
+                    // Moving the start keeps a multi-day event's length.
+                    onPick = { picked -> shiftStart(ChronoUnit.DAYS.between(date, picked)); picking = null },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
             }
 
             // ── Last day (multi-day events only) ──
@@ -201,6 +229,7 @@ fun EventEditorSheet(
             ) {
                 val end = endDate ?: date.plusDays(lastSpanDays)
                 val days = ChronoUnit.DAYS.between(date, end) + 1
+                Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     GlyphButton(
                         "‹",
@@ -208,13 +237,12 @@ fun EventEditorSheet(
                         onClick = { haptics.tap(); endDate = end.minusDays(1) },
                         enabled = days > 2
                     )
-                    Text(
-                        "${end.koreanLabel()} 까지 · ${days}일",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium,
+                    DateLabel(
+                        text = "${end.koreanLabel()} 까지 · ${days}일",
                         color = end.labelColor() ?: MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center
+                        open = picking == DatePart.END,
+                        onClick = { haptics.tap(); togglePicker(DatePart.END) },
+                        modifier = Modifier.weight(1f)
                     )
                     GlyphButton(
                         "›",
@@ -222,6 +250,20 @@ fun EventEditorSheet(
                         onClick = { haptics.tap(); endDate = end.plusDays(1) },
                         enabled = days < MAX_EVENT_DAYS
                     )
+                }
+                AnimatedVisibility(
+                    visible = picking == DatePart.END,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    InlineDatePicker(
+                        selected = end,
+                        onPick = { picked -> endDate = picked; picking = null },
+                        minDate = date.plusDays(1),
+                        maxDate = date.plusDays(MAX_EVENT_DAYS - 1L),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
                 }
             }
 
@@ -254,7 +296,10 @@ fun EventEditorSheet(
                 supportingText = if (showError) {
                     { Text("일정 내용을 입력해 주세요") }
                 } else null,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // Close an open month grid so it doesn't sit under the keyboard.
+                    .onFocusChanged { if (it.isFocused) picking = null }
             )
             Spacer(Modifier.height(12.dp))
 
@@ -374,6 +419,45 @@ fun EventEditorSheet(
                 shape = RoundedCornerShape(14.dp)
             ) { Text(saveLabel, fontSize = 16.sp) }
         }
+    }
+}
+
+/** The date whose month grid is open in [EventEditorSheet]. */
+private enum class DatePart { START, END }
+
+/**
+ * Tappable date line with a small ▾/▴ that tells it opens a month grid.
+ * Announced as a button so TalkBack users know it can be activated.
+ */
+@Composable
+private fun DateLabel(text: String, color: Color, open: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(
+                onClickLabel = if (open) "달력 닫기" else "달력에서 날짜 고르기",
+                role = Role.Button,
+                onClick = onClick
+            )
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+            color = color,
+            textAlign = TextAlign.Center,
+            // Measured after the ▾, so a long label wraps instead of squeezing the hint out.
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            if (open) " ▴" else " ▾",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clearAndSetSemantics {}
+        )
     }
 }
 
