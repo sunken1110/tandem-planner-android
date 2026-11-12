@@ -1,6 +1,8 @@
 *.iml
-.gradle
-/local.properties
+.gradle/
+.kotlin/
+build/
+local.properties
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -8,7 +10,6 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
 /captures
 .externalNativeBuild
 .cxx
@@ -22,11 +23,6 @@
 *.apk
 *.aab
 
-# 임시 파일
-.gradle/
-.kotlin/
-/build/
-local.properties
-
-# Firebase 설정 (공개 저장소로 바꿀 때 주석 해제)
-# app/google-services.json
+# Claude
+.claude/settings.local.json
+CLAUDE.local.md
