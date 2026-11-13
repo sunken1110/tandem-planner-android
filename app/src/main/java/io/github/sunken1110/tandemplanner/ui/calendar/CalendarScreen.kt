@@ -496,9 +496,11 @@ fun CalendarScreen(
                             onUpdateEvent = { event, d, openedFrom ->
                                 calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
                                 // Follow only when the event left the day it was opened from;
-                                // a multi-day event that still covers it stays in view.
+                                // a multi-day event that still covers it stays in view. Go to
+                                // its covered day nearest that day (e.g. a shortened end lands
+                                // on the new last day, not back on the start).
                                 val end = d.endDate ?: d.date
-                                if (openedFrom !in d.date..end) followSaved(d.date)
+                                if (openedFrom !in d.date..end) followSaved(openedFrom.coerceIn(d.date, end))
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },

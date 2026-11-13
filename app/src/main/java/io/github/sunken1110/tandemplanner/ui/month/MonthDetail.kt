@@ -229,6 +229,11 @@ fun MonthDetail(
     // The day the edited event was opened from; captured on tap so a later
     // selection change (e.g. a widget request) can't alter it.
     var editingFrom by remember { mutableStateOf<LocalDate?>(null) }
+    // Closes the editor and forgets its day, so no later opening reuses it.
+    fun closeEditor() {
+        editingEvent = null
+        editingFrom = null
+    }
     // The event whose delete button was tapped, waiting for confirmation.
     var deletingEvent by remember { mutableStateOf<Event?>(null) }
     // Every event once (a multi-day event is listed under each of its days).
@@ -760,17 +765,17 @@ fun MonthDetail(
                 },
                 // Leave the event itself out, so it doesn't "suggest" its own old time.
                 history = remember(allEvents, event.id) { allEvents.filter { it.id != event.id } },
-                onDismiss = { editingEvent = null },
+                onDismiss = { closeEditor() },
                 onSave = { draft ->
                     onUpdateEvent(event, draft, openedFrom)
-                    editingEvent = null
+                    closeEditor()
                 },
                 saveLabel = "수정",
                 checklists = checklistsFor(event),
                 onChecklist = onEventChecklist?.let { open ->
                     { edited, listId ->
                         edited?.let { onUpdateEvent(event, it, openedFrom) }
-                        editingEvent = null
+                        closeEditor()
                         open(event, edited?.title ?: event.title, listId)
                     }
                 }
