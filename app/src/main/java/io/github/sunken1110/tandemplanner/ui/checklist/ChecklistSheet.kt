@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -72,7 +73,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -80,6 +80,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.sp
 import io.github.sunken1110.tandemplanner.data.ChecklistChange
 import io.github.sunken1110.tandemplanner.data.ChecklistList
@@ -89,19 +90,15 @@ import io.github.sunken1110.tandemplanner.data.SharedCalendar
 import io.github.sunken1110.tandemplanner.data.takeWhole
 import io.github.sunken1110.tandemplanner.data.SharedChecklists
 import io.github.sunken1110.tandemplanner.data.sortedByTime
-import io.github.sunken1110.tandemplanner.model.KoreanHolidays
 import io.github.sunken1110.tandemplanner.model.Season
 import io.github.sunken1110.tandemplanner.ui.common.colorOf
 import io.github.sunken1110.tandemplanner.ui.common.ddayText
 import io.github.sunken1110.tandemplanner.ui.common.displayTime
-import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
+import io.github.sunken1110.tandemplanner.ui.common.MiniMonthPicker
+import io.github.sunken1110.tandemplanner.ui.common.miniDayNumberColor
 import io.github.sunken1110.tandemplanner.ui.common.periodLabel
-import io.github.sunken1110.tandemplanner.ui.common.WeekdayHeaders
-import io.github.sunken1110.tandemplanner.ui.common.weekdayHeaderColor
-import io.github.sunken1110.tandemplanner.ui.common.weekendColor
 import io.github.sunken1110.tandemplanner.ui.effects.rememberHaptics
 import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
-import io.github.sunken1110.tandemplanner.ui.theme.SundayRed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -606,8 +603,7 @@ private fun LinkEventDialog(
 
     /** Shows another month, selecting today there, else its first day with events. */
     fun showMonth(target: YearMonth) {
-        haptics.tap()
-        month = target
+        month = target // MiniMonthPicker already tapped the haptic
         selected = today.takeIf { YearMonth.from(it) == target }
             ?: (1..target.lengthOfMonth()).map { target.atDay(it) }.firstOrNull { day -> events.any { it.covers(day) } }
             ?: target.atDay(1)
@@ -618,64 +614,35 @@ private fun LinkEventDialog(
         title = { Text("어떤 일정의 리스트인가요?") },
         text = {
             Column {
-                // ── Month ──
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    GlyphButton("‹", "이전 달", onClick = { showMonth(month.minusMonths(1)) })
-                    Text(
-                        "${month.year}년 ${month.monthValue}월",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f)
-                    )
-                    GlyphButton("›", "다음 달", onClick = { showMonth(month.plusMonths(1)) })
-                }
-                Row {
-                    WeekdayHeaders.forEachIndexed { column, label ->
-                        Text(
-                            label,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center,
-                            color = weekdayHeaderColor(column),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-
-                // ── Days ──
-                val lead = month.atDay(1).dayOfWeek.value % 7 // Sunday = 0
-                val cells = lead + month.lengthOfMonth()
-                for (week in 0 until (cells + 6) / 7) {
-                    Row {
-                        for (column in 0..6) {
-                            val n = week * 7 + column - lead + 1
-                            if (n !in 1..month.lengthOfMonth()) {
-                                Spacer(Modifier.weight(1f).height(PICKER_CELL))
-                                continue
-                            }
-                            val day = month.atDay(n)
-                            DayCellSmall(
-                                day = day,
-                                band = pickedEvent?.takeIf { it.covers(day) }?.let { e ->
-                                    PickedBand(
-                                        color = calendar.colorOf(e.authorUid),
-                                        // Rounded at the event's ends, and squared where a week row breaks it.
-                                        roundStart = day == e.date || column == 0 || n == 1,
-                                        roundEnd = day == e.lastDate || column == 6 || n == month.lengthOfMonth()
-                                    )
-                                },
-                                isToday = day == today,
-                                isSelected = day == selected,
-                                dots = byDay[day].orEmpty().map { calendar.colorOf(it.authorUid) }.distinct().take(3),
-                                onClick = {
-                                    haptics.tap()
-                                    selected = day
-                                },
-                                modifier = Modifier.weight(1f)
+                // ── Month and days (only this month's days, no slide) ──
+                MiniMonthPicker(
+                    month = month,
+                    onMonthChange = { showMonth(it) },
+                    arrowFontSize = 20.sp,
+                    weekdayFontSize = 11.sp,
+                    weekdayPadding = PaddingValues(bottom = 4.dp),
+                    sixWeeks = false,
+                    animateMonthChange = false
+                ) { day, column, _ ->
+                    DayCellSmall(
+                        day = day,
+                        band = pickedEvent?.takeIf { it.covers(day) }?.let { e ->
+                            PickedBand(
+                                color = calendar.colorOf(e.authorUid),
+                                // Rounded at the event's ends, and squared where a week row breaks it.
+                                roundStart = day == e.date || column == 0 || day.dayOfMonth == 1,
+                                roundEnd = day == e.lastDate || column == 6 || day.dayOfMonth == month.lengthOfMonth()
                             )
-                        }
-                    }
+                        },
+                        isToday = day == today,
+                        isSelected = day == selected,
+                        dots = byDay[day].orEmpty().map { calendar.colorOf(it.authorUid) }.distinct().take(3),
+                        onClick = {
+                            haptics.tap()
+                            selected = day
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 // ── The selected day's events ──
@@ -788,12 +755,9 @@ private fun LinkEventDialog(
 /** The picked event's days on the picker's calendar, and where its block ends round off. */
 private data class PickedBand(val color: Color, val roundStart: Boolean, val roundEnd: Boolean)
 
-/** Height of a day in the picker's calendar. */
-private val PICKER_CELL = 38.dp
-
 /**
- * A day in the picker: its number (holidays red), up to three authors' dots, and
- * behind the number a piece of the picked event's block when it covers this day.
+ * A day in the picker's [MiniMonthPicker]: its number (holidays red), up to three
+ * authors' dots, and behind the number a piece of the picked event's block when it covers this day.
  */
 @Composable
 private fun DayCellSmall(
@@ -805,15 +769,14 @@ private fun DayCellSmall(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val numberColor = when {
-        isSelected -> MaterialTheme.colorScheme.onPrimary
-        KoreanHolidays.of(day) != null -> SundayRed
-        else -> day.dayOfWeek.weekendColor() ?: MaterialTheme.colorScheme.onSurface
-    }
+    val numberColor = miniDayNumberColor(day, isSelected)
     // Not clipped: a block runs edge to edge into the neighboring days.
     Column(
         modifier
-            .height(PICKER_CELL)
+            .semantics {
+                contentDescription = day.koreanDayLabel()
+                this.selected = isSelected
+            }
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

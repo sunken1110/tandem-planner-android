@@ -152,7 +152,7 @@ app/src/main/java/io/github/sunken1110/tandemplanner/
 │   └─ WidgetConfigActivity.kt  # Background settings screen with photo crop
 └─ ui/
     ├─ theme/               # Material theme + calendar/member colors
-    ├─ common/              # DayCell, MonthGrid, EventMarks (chips, D-day badge), WheelPicker, YearPaint, GlyphButton, time/member helpers
+    ├─ common/              # DayCell, MonthGrid, MiniMonthPicker (small date-picking calendar), EventMarks (chips, D-day badge), WheelPicker, YearPaint, GlyphButton, time/member helpers
     ├─ editor/              # Event editor bottom sheet, time wheel, inline date picker
     ├─ quickadd/            # Floating natural-language input with live preview
     ├─ checklist/           # Checklist button, sheet (all lists / one list), rows, celebration
