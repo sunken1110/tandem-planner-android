@@ -112,8 +112,10 @@ private fun MonthCard(
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
             .clickable(onClick = onClick)
             // Read as "11월", not as the month name followed by every weekday letter.
+            // Another year's card says its year too ("2027년 1월").
             .clearAndSetSemantics {
-                contentDescription = "${yearMonth.monthValue}월"
+                contentDescription =
+                    (if (yearMonth.year != paint.today.year) "${yearMonth.year}년 " else "") + "${yearMonth.monthValue}월"
                 role = Role.Button
                 onClick { onClick(); true }
             }

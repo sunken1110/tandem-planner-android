@@ -160,7 +160,7 @@ app/src/main/java/io/github/sunken1110/tandemplanner/
     ├─ checklist/           # Checklist button, sheet (all lists / one list), rows, celebration
     ├─ effects/             # Seasonal particles, intro overlay, haptics, reduce-motion check
     ├─ calendar/            # CalendarScreen: screen state and year↔month switching
-    ├─ year/                # Year header (progress, D-day card), 12-month grid
+    ├─ year/                # Year header (progress, D-day card), year switcher, 12-month grid
     ├─ month/               # Month view, multi-day bands, event row, selection ring
     ├─ setup/               # Create / join / recover a shared calendar
     └─ share/               # Member bar and share dialog (room code, recovery code)
@@ -267,7 +267,7 @@ Open the project in Android Studio, let Gradle sync, and press **Run**.
 Set `DEBUG_TODAY` in `AppConfig.kt` (e.g. `LocalDate.of(2026, 3, 1)`) to preview another season's colors, particles and the season-start banner. Set it back to `null` before releasing.
 
 ### Updating public holidays
-Holidays are listed per year in `model/Holidays.kt` (`COVERED_YEARS`). Add the next year's list once it is announced, usually in the summer before.
+Holidays are listed per year in `model/Holidays.kt` (`COVERED_YEARS`). Add the next year's list once it is announced, usually in the summer before. The calendar shows last year to next year, so `COVERED_YEARS` must reach one year past the current one (e.g. 2028 before 2027-01-01).
 
 ---
 

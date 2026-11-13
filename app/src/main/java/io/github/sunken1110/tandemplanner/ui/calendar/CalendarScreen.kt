@@ -36,7 +36,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.animation.EnterExitState
+import io.github.sunken1110.tandemplanner.ui.effects.rememberReduceMotion
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.Lifecycle
@@ -165,8 +168,16 @@ fun CalendarScreen(
     // The header (days passed, D-day card) always stays on today.
     val shownYears = (year - 1)..(year + 1)
     var shownYear by rememberSaveable { mutableIntStateOf(year) }
-    // After New Year's Eve the range moves on; keep the shown year inside it.
-    LaunchedEffect(year) { shownYear = shownYear.coerceIn(shownYears) }
+    // The current year when the range was last set; saved too, so a rotation
+    // isn't mistaken for New Year.
+    var rangeYear by rememberSaveable { mutableIntStateOf(year) }
+    // After New Year's Eve the range moves on. Someone viewing "this year" moves on
+    // to the new year with it; any other shown year is kept inside the range.
+    LaunchedEffect(year) {
+        if (year == rangeYear) return@LaunchedEffect
+        shownYear = if (shownYear == rangeYear) year else shownYear.coerceIn(shownYears)
+        rangeYear = year
+    }
 
     // ── Year fill animation ──
     // `fill` counts how many days have been "painted" (fractional). Cells read it
@@ -226,15 +237,11 @@ fun CalendarScreen(
 
     // Year grid scroll positions, kept here because a grid is disposed while a month
     // (or another year) is shown. One per shown year: two grids are on screen together
-    // while sliding between years, and a grid state can't be shared by both.
-    val lastYearGrid = rememberLazyGridState()
-    val thisYearGrid = rememberLazyGridState()
-    val nextYearGrid = rememberLazyGridState()
-    fun gridStateOf(y: Int) = when (y - year) {
-        -1 -> lastYearGrid
-        1 -> nextYearGrid
-        else -> thisYearGrid
-    }
+    // while sliding between years, and a grid state can't be shared by both. Keyed by
+    // the actual year, so New Year doesn't swap them. Created on first use (getOrPut
+    // returns the same state on every later call, so doing it in composition is safe).
+    val yearGridStates = rememberSaveable(saver = YearGridStatesSaver) { mutableMapOf() }
+    fun gridStateOf(y: Int): LazyGridState = yearGridStates.getOrPut(y) { LazyGridState() }
 
     /**
      * Back to the year view. The card-shrink animation needs the month's card to
@@ -452,13 +459,17 @@ fun CalendarScreen(
             // Year ↔ month: the tapped card expands in place via shared bounds.
             SharedTransitionLayout(Modifier.fillMaxSize()) {
                 val sharedScope = this
+                val reduceMotion = rememberReduceMotion()
                 AnimatedContent(
                     targetState = CalendarView(shownYear, selectedMonth),
                     transitionSpec = {
                         val from = initialState
                         val to = targetState
-                        val forward = slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
-                        val backward = slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
+                        // With the system's "remove animations" setting, a plain fade instead of a slide.
+                        val forward = if (reduceMotion) fadeIn() togetherWith fadeOut()
+                            else slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
+                        val backward = if (reduceMotion) fadeIn() togetherWith fadeOut()
+                            else slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
                         val fromMonth = from.month
                         val toMonth = to.month
                         when {
@@ -476,6 +487,9 @@ fun CalendarScreen(
                     label = "monthView"
                 ) { view ->
                     val animScope = this
+                    // The view sliding out still takes taps during the transition, but its
+                    // arrows would step from its own (old) year or month: ignore them.
+                    fun leaving() = animScope.transition.targetState == EnterExitState.PostExit
                     // Painted for the view's own year, so the outgoing year keeps its
                     // look while sliding away.
                     val viewPaint = remember(paint, view.year) { paintOf(view.year) }
@@ -486,7 +500,7 @@ fun CalendarScreen(
                                 year = view.year,
                                 thisYear = year,
                                 years = shownYears,
-                                onYearChange = { shownYear = it.coerceIn(shownYears) }
+                                onYearChange = { if (!leaving()) shownYear = it.coerceIn(shownYears) }
                             )
                             Spacer(Modifier.height(4.dp))
                             YearGrid(
@@ -497,6 +511,7 @@ fun CalendarScreen(
                                 sharedScope = sharedScope,
                                 animScope = animScope,
                                 onMonthClick = {
+                                    if (leaving()) return@YearGrid
                                     haptics.tap()
                                     shownYear = view.year
                                     selectedMonth = it
@@ -511,7 +526,7 @@ fun CalendarScreen(
                         // after moving to another month, coming back opens normally,
                         // at the top with the whole grid in view.
                         fun goTo(target: YearMonth) {
-                            if (target.year !in shownYears) return
+                            if (leaving() || target.year !in shownYears) return
                             focusDate = null
                             shownYear = target.year
                             selectedMonth = target.monthValue
@@ -710,6 +725,16 @@ fun CalendarScreen(
 
 /** What the calendar area shows: [year]'s grid, or with [month] (1..12) that month expanded. */
 private data class CalendarView(val year: Int, val month: Int?)
+
+/** Saves each year grid's scroll position as (year, first item, offset) triples. */
+private val YearGridStatesSaver = listSaver<MutableMap<Int, LazyGridState>, Int>(
+    save = { states ->
+        states.flatMap { (y, s) -> listOf(y, s.firstVisibleItemIndex, s.firstVisibleItemScrollOffset) }
+    },
+    restore = { saved ->
+        saved.chunked(3).associateTo(mutableMapOf()) { (y, index, offset) -> y to LazyGridState(index, offset) }
+    }
+)
 
 /** Every day's season color of [year], index = dayOfYear - 1. */
 private fun yearColorsOf(year: Int): List<Color> =

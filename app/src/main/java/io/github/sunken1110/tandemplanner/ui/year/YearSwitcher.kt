@@ -1,6 +1,5 @@
 package io.github.sunken1110.tandemplanner.ui.year
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -8,7 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -42,8 +42,11 @@ fun YearSwitcher(
     modifier: Modifier = Modifier
 ) {
     val haptics = rememberHaptics()
-    Box(modifier.fillMaxWidth()) {
-        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+    // Equal-weight sides keep the arrows centered, and the button gets its own
+    // side, so the two can't overlap even with a large system font.
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.weight(1f))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             GlyphButton(
                 "‹", "이전 해",
                 onClick = { haptics.tap(); onYearChange(year - 1) },
@@ -64,20 +67,18 @@ fun YearSwitcher(
                 enabled = year + 1 in years
             )
         }
-        AnimatedVisibility(
-            visible = year != thisYear,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            OutlinedButton(
-                onClick = { haptics.tap(); onYearChange(thisYear) },
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                Text("올해로", fontSize = 12.sp)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            // The plain (non-RowScope) version: this sits in a Box inside the Row.
+            androidx.compose.animation.AnimatedVisibility(visible = year != thisYear, enter = fadeIn(), exit = fadeOut()) {
+                OutlinedButton(
+                    onClick = { haptics.tap(); onYearChange(thisYear) },
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier.heightIn(min = 30.dp)
+                ) {
+                    Text("올해로", fontSize = 12.sp, maxLines = 1)
+                }
             }
         }
     }
