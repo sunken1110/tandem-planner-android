@@ -25,6 +25,7 @@
   - **Winter** (Dec–Feb): frost → deep silver → clear silver
 - A progress bar shows the year's full color flow and the number of days passed. Tapping the count switches to the days left ("55일 남음"): the digits roll over and the bar shows the rest of the year instead; the choice is remembered.
 - On launch, the filled cells sweep in from January 1 to today.
+- **Last and next year**: "‹ 2026년 ›" above the grid steps between last year, this year and next year (last year fully filled, next year not yet). While another year is shown, "올해로" (or the back gesture) returns to this year. The count, bar and D-day card above always stay on today.
 - **D-day card**: the next event (or a trip under way) with its D-day. The badge deepens as the day approaches (D-8+, D-7…2, D-1, then filled on the day). Tapping it opens that day. With nothing coming up, it shows how many days are left in the season.
 
 ### Shared calendar for two
@@ -38,7 +39,8 @@
 - **Seat recovery:** each member keeps a personal recovery code. After reinstalling the app or changing phones, the room code and recovery code bring back the same seat: name, color and own events.
 
 ### Month view and events
-- Tap a month to expand it in place (shared-element transition), and move between months with the arrows. The "‹ 2026년 · ‹ 11월 ›" bar stays at the top while the rest scrolls.
+- Tap a month to expand it in place (shared-element transition), and move between months with the arrows. The arrows continue across years (12월 › opens next year's 1월, shown as "2027년 / 1월"), within last year to next year. The "‹ 2026년 · ‹ 11월 ›" bar stays at the top while the rest scrolls.
+- Saving or moving an event to another day (also in last or next year) opens that day, and so do the D-day card and widget taps.
 - Going back always shrinks into the right card: the year grid keeps its scroll position and scrolls the card into view first.
 - Today's date number sits in a dark, season-toned circle. The selected day has a floating ring in the season's color that glides between cells (a deep ring with a soft glow in light mode, a neon tube in dark mode). Every few seconds a light runs around it while its glow breathes.
 - **Public holidays** (incl. substitute holidays and election days) show a red day number and a short name. Weekend day numbers are always colored (Sunday red, Saturday sky blue).

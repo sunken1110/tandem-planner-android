@@ -96,9 +96,11 @@ import io.github.sunken1110.tandemplanner.ui.share.SharedBar
 import io.github.sunken1110.tandemplanner.ui.year.SeasonBanner
 import io.github.sunken1110.tandemplanner.ui.year.YearGrid
 import io.github.sunken1110.tandemplanner.ui.year.YearHeader
+import io.github.sunken1110.tandemplanner.ui.year.YearSwitcher
 import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.Year
 import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import kotlin.time.Duration.Companion.milliseconds
@@ -150,14 +152,21 @@ fun CalendarScreen(
     }
 
     val year = today.year
-    val totalDays = today.lengthOfYear()
     val passedDays = today.dayOfYear
     val season = Season.of(today.monthValue)
     val dark = isSystemInDarkTheme()
     val haptics = rememberHaptics()
 
     // Precompute every day's color once per year instead of on every frame.
-    val yearColors = remember(year) { List(totalDays) { dayColor(LocalDate.ofYearDay(year, it + 1)) } }
+    val yearColors = remember(year) { yearColorsOf(year) }
+
+    // The year shown by the year grid and the month view: last year to next year,
+    // so January can be planned in December and December looked back on in January.
+    // The header (days passed, D-day card) always stays on today.
+    val shownYears = (year - 1)..(year + 1)
+    var shownYear by rememberSaveable { mutableIntStateOf(year) }
+    // After New Year's Eve the range moves on; keep the shown year inside it.
+    LaunchedEffect(year) { shownYear = shownYear.coerceIn(shownYears) }
 
     // ── Year fill animation ──
     // `fill` counts how many days have been "painted" (fractional). Cells read it
@@ -171,7 +180,9 @@ fun CalendarScreen(
         )
     }
     val fillProvider = remember { { fill.value } }
-    val paint = remember(today, yearColors) { YearPaint(today, yearColors, fillProvider) }
+    val paint = remember(today, yearColors) { YearPaint(today, year, yearColors, fillProvider) }
+    // Another year's paint, built when that year is shown (this year's is reused).
+    fun paintOf(y: Int): YearPaint = if (y == year) paint else YearPaint(today, y, yearColorsOf(y), fillProvider)
     val shownCount by remember(passedDays) { derivedStateOf { fill.value.toInt().coerceAtMost(passedDays) } }
 
     // ── Shared data ──
@@ -213,8 +224,17 @@ fun CalendarScreen(
     // null = year overview, 1..12 = expanded month.
     var selectedMonth by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    // Year grid scroll position, kept here because the grid is disposed while a month is open.
-    val yearGridState = rememberLazyGridState()
+    // Year grid scroll positions, kept here because a grid is disposed while a month
+    // (or another year) is shown. One per shown year: two grids are on screen together
+    // while sliding between years, and a grid state can't be shared by both.
+    val lastYearGrid = rememberLazyGridState()
+    val thisYearGrid = rememberLazyGridState()
+    val nextYearGrid = rememberLazyGridState()
+    fun gridStateOf(y: Int) = when (y - year) {
+        -1 -> lastYearGrid
+        1 -> nextYearGrid
+        else -> thisYearGrid
+    }
 
     /**
      * Back to the year view. The card-shrink animation needs the month's card to
@@ -224,6 +244,7 @@ fun CalendarScreen(
     fun backToYear() {
         val month = selectedMonth ?: return
         val index = month - 1
+        val yearGridState = gridStateOf(shownYear)
         val info = yearGridState.layoutInfo
         val card = info.visibleItemsInfo.firstOrNull { it.index == index }
         val fullyVisible = card != null &&
@@ -234,6 +255,8 @@ fun CalendarScreen(
     }
 
     BackHandler(enabled = selectedMonth != null) { backToYear() }
+    // In the year view of another year, back returns to this year first.
+    BackHandler(enabled = selectedMonth == null && shownYear != year) { shownYear = year }
 
     // Quick-add: the parsed draft waiting for confirmation, and the date to
     // highlight after saving it.
@@ -277,15 +300,24 @@ fun CalendarScreen(
         }
     }
 
-    // A widget tap: open the requested day (this year only), or focus quick add.
+    /**
+     * Opens [day] in the month view (switching to its year) and selects it.
+     * Returns false, staying put, for a day outside the years the calendar shows.
+     */
+    fun openDay(day: LocalDate): Boolean {
+        if (day.year !in shownYears) return false
+        focusDate = day
+        focusToken++
+        shownYear = day.year
+        selectedMonth = day.monthValue
+        return true
+    }
+
+    // A widget tap: open the requested day, or focus quick add.
     var quickAddFocus by remember { mutableIntStateOf(0) }
     LaunchedEffect(launchRequest?.token) {
         val request = launchRequest ?: return@LaunchedEffect
-        request.date?.takeIf { it.year == year }?.let { day ->
-            focusDate = day
-            focusToken++
-            selectedMonth = day.monthValue
-        }
+        request.date?.let { openDay(it) }
         if (request.quickAdd) quickAddFocus++
         onLaunchHandled()
     }
@@ -295,14 +327,11 @@ fun CalendarScreen(
     }
     /**
      * Opens the month of a just-saved event and selects its day, so the event
-     * doesn't seem to vanish when it was put on another day. Stays put for
-     * another year (the year view isn't switched).
+     * doesn't seem to vanish when it was put on another day, in last or next
+     * year too. Stays put for a year the calendar doesn't show.
      */
     fun followSaved(day: LocalDate) {
-        if (day.year != year) return
-        focusDate = day
-        focusToken++
-        selectedMonth = day.monthValue
+        openDay(day)
     }
 
     val bgTint by animateColorAsState(
@@ -415,13 +444,7 @@ fun CalendarScreen(
                 colorOf = memberColor,
                 // Open the event's day (today, for a trip under way) in the month view.
                 onNextClick = { event ->
-                    val day = maxOf(event.date, today)
-                    if (day.year == year) {
-                        haptics.tap()
-                        focusDate = day
-                        focusToken++
-                        selectedMonth = day.monthValue
-                    }
+                    if (openDay(maxOf(event.date, today))) haptics.tap()
                 }
             )
             Spacer(Modifier.height(14.dp))
@@ -430,41 +453,72 @@ fun CalendarScreen(
             SharedTransitionLayout(Modifier.fillMaxSize()) {
                 val sharedScope = this
                 AnimatedContent(
-                    targetState = selectedMonth,
+                    targetState = CalendarView(shownYear, selectedMonth),
                     transitionSpec = {
                         val from = initialState
                         val to = targetState
+                        val forward = slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
+                        val backward = slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
+                        val fromMonth = from.month
+                        val toMonth = to.month
                         when {
+                            // Year → year: the next year slides in from the right, the previous from the left.
+                            fromMonth == null && toMonth == null ->
+                                if (to.year > from.year) forward else backward
                             // Size change is handled by sharedBounds; only fade here.
-                            from == null || to == null ->
+                            fromMonth == null || toMonth == null ->
                                 fadeIn(tween(350)) togetherWith fadeOut(tween(250))
-                            // Month → next month slides in from the right, previous from the left.
-                            to > from ->
-                                slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
-                            else ->
-                                slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
+                            // Month → next month (also across a year) slides in from the right.
+                            YearMonth.of(to.year, toMonth) > YearMonth.of(from.year, fromMonth) -> forward
+                            else -> backward
                         }
                     },
                     label = "monthView"
-                ) { month ->
+                ) { view ->
                     val animScope = this
+                    // Painted for the view's own year, so the outgoing year keeps its
+                    // look while sliding away.
+                    val viewPaint = remember(paint, view.year) { paintOf(view.year) }
+                    val month = view.month
                     if (month == null) {
-                        YearGrid(
-                            paint = paint,
-                            eventsByDate = eventsByDate,
-                            colorOf = memberColor,
-                            state = yearGridState,
-                            sharedScope = sharedScope,
-                            animScope = animScope,
-                            onMonthClick = {
-                                haptics.tap()
-                                selectedMonth = it
-                            }
-                        )
+                        Column {
+                            YearSwitcher(
+                                year = view.year,
+                                thisYear = year,
+                                years = shownYears,
+                                onYearChange = { shownYear = it.coerceIn(shownYears) }
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            YearGrid(
+                                paint = viewPaint,
+                                eventsByDate = eventsByDate,
+                                colorOf = memberColor,
+                                state = gridStateOf(view.year),
+                                sharedScope = sharedScope,
+                                animScope = animScope,
+                                onMonthClick = {
+                                    haptics.tap()
+                                    shownYear = view.year
+                                    selectedMonth = it
+                                }
+                            )
+                        }
                     } else {
+                        val yearMonth = YearMonth.of(view.year, month)
+                        val prevMonth = yearMonth.minusMonths(1)
+                        val nextMonth = yearMonth.plusMonths(1)
+                        // A requested day (D-day card, widget, quick add) is shown once:
+                        // after moving to another month, coming back opens normally,
+                        // at the top with the whole grid in view.
+                        fun goTo(target: YearMonth) {
+                            if (target.year !in shownYears) return
+                            focusDate = null
+                            shownYear = target.year
+                            selectedMonth = target.monthValue
+                        }
                         MonthDetail(
-                            yearMonth = YearMonth.of(year, month),
-                            paint = paint,
+                            yearMonth = yearMonth,
+                            paint = viewPaint,
                             eventsByDate = eventsByDate,
                             sharedScope = sharedScope,
                             animScope = animScope,
@@ -504,11 +558,10 @@ fun CalendarScreen(
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },
-                            // A requested day (D-day card, widget, quick add) is shown once:
-                            // after moving to another month, coming back opens normally,
-                            // at the top with the whole grid in view.
-                            onPrev = { if (month > 1) { focusDate = null; selectedMonth = month - 1 } },
-                            onNext = { if (month < 12) { focusDate = null; selectedMonth = month + 1 } }
+                            onPrev = { goTo(prevMonth) },
+                            onNext = { goTo(nextMonth) },
+                            hasPrev = prevMonth.year in shownYears,
+                            hasNext = nextMonth.year in shownYears
                         )
                     }
                 }
@@ -655,10 +708,17 @@ fun CalendarScreen(
 }
 
 
+/** What the calendar area shows: [year]'s grid, or with [month] (1..12) that month expanded. */
+private data class CalendarView(val year: Int, val month: Int?)
+
+/** Every day's season color of [year], index = dayOfYear - 1. */
+private fun yearColorsOf(year: Int): List<Color> =
+    List(Year.of(year).length()) { dayColor(LocalDate.ofYearDay(year, it + 1)) }
+
 /**
  * A request to open the calendar somewhere specific, from a home-screen widget tap.
  *
- * @property date  the day to show in the month view (this year only), or null.
+ * @property date  the day to show in the month view (last year to next year), or null.
  * @property quickAdd true to focus the quick-add bar.
  * @property token unique per tap, so tapping the same day twice still works.
  */
