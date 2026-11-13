@@ -23,7 +23,7 @@ tandemplanner/
 ├─ ui/month/              MonthDetail, MonthBands(여러 날 띠), EventRow(체크리스트 칩), SelectionRing
 ├─ ui/editor/             EventEditorSheet, TimeWheel, InlineDatePicker(날짜를 누르면 펼쳐지는 달력)
 ├─ ui/checklist/          ChecklistButton, ChecklistSheet(목록·일정 연결 달력), ChecklistDetail(항목), ChecklistEffects
-├─ ui/common/             DayCell, MonthGrid, EventMarks, CalendarLabels(koreanDayLabel), TimeFormat, WheelPicker, GlyphButton, Members, YearPaint
+├─ ui/common/             DayCell, MonthGrid, MiniMonthPicker(일정 편집·체크리스트 연결이 함께 쓰는 작은 날짜 달력), EventMarks, CalendarLabels(koreanDayLabel), TimeFormat, WheelPicker, GlyphButton, Members, YearPaint
 ├─ ui/effects/            Haptics, IntroOverlay, ReduceMotion, SeasonParticles
 ├─ ui/quickadd/, setup/, share/, theme/
 └─ widget/                TandemWidget(Glance), WidgetStore, WidgetStyle(배경·사진), WidgetUpdater, WidgetRefreshWorker, WidgetConfigActivity
