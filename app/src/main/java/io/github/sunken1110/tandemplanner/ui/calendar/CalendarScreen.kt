@@ -365,7 +365,7 @@ fun CalendarScreen(
                     colorOf = memberColor,
                     nameOf = nameOf,
                     onAddEvent = {},
-                    onUpdateEvent = { _, _ -> },
+                    onUpdateEvent = { _, _, _ -> },
                     onDeleteEvent = {},
                     onBack = {},
                     onPrev = {},
@@ -493,9 +493,14 @@ fun CalendarScreen(
                                 // The editor's month grid can put it on any day.
                                 followSaved(d.date)
                             },
-                            onUpdateEvent = { event, d ->
+                            onUpdateEvent = { event, d, openedFrom ->
                                 calendar.updateEvent(event, d.date, d.storedTime { it.toStoredTime() }, d.title, d.endDate)
-                                if (d.date != event.date) followSaved(d.date)
+                                // Follow only when the event left the day it was opened from;
+                                // a multi-day event that still covers it stays in view. Go to
+                                // its covered day nearest that day (e.g. a shortened end lands
+                                // on the new last day, not back on the start).
+                                val end = d.endDate ?: d.date
+                                if (openedFrom !in d.date..end) followSaved(openedFrom.coerceIn(d.date, end))
                             },
                             onDeleteEvent = { event -> calendar.deleteEvent(event) },
                             onBack = { backToYear() },

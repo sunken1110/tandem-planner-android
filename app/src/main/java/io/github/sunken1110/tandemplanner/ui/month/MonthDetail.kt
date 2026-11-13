@@ -204,7 +204,8 @@ fun MonthDetail(
     onOpenChecklist: (listId: String) -> Unit = {},
     onEventChecklist: ((event: Event, title: String, listId: String?) -> Unit)? = null,
     onAddEvent: (EventDraft) -> Unit,
-    onUpdateEvent: (Event, EventDraft) -> Unit,
+    /** [openedFrom] is the day whose list the editor was opened from. */
+    onUpdateEvent: (event: Event, draft: EventDraft, openedFrom: LocalDate) -> Unit,
     onDeleteEvent: (Event) -> Unit,
     onBack: () -> Unit,
     onPrev: () -> Unit,
@@ -225,6 +226,14 @@ fun MonthDetail(
     var showAddDialog by remember { mutableStateOf(false) }
     // The event being edited in the sheet, or null.
     var editingEvent by remember { mutableStateOf<Event?>(null) }
+    // The day the edited event was opened from; captured on tap so a later
+    // selection change (e.g. a widget request) can't alter it.
+    var editingFrom by remember { mutableStateOf<LocalDate?>(null) }
+    // Closes the editor and forgets its day, so no later opening reuses it.
+    fun closeEditor() {
+        editingEvent = null
+        editingFrom = null
+    }
     // The event whose delete button was tapped, waiting for confirmation.
     var deletingEvent by remember { mutableStateOf<Event?>(null) }
     // Every event once (a multi-day event is listed under each of its days).
@@ -710,6 +719,7 @@ fun MonthDetail(
                                     },
                                     onClick = {
                                         haptics.tap()
+                                        editingFrom = selectedDate
                                         editingEvent = e
                                     },
                                     onDelete = {
@@ -740,6 +750,7 @@ fun MonthDetail(
     }
 
     editingEvent?.let { event ->
+        val openedFrom = editingFrom ?: selectedDate
         key(event.id) {
             EventEditorSheet(
                 initial = parseStoredTime(event.time).let { parsed ->
@@ -754,17 +765,17 @@ fun MonthDetail(
                 },
                 // Leave the event itself out, so it doesn't "suggest" its own old time.
                 history = remember(allEvents, event.id) { allEvents.filter { it.id != event.id } },
-                onDismiss = { editingEvent = null },
+                onDismiss = { closeEditor() },
                 onSave = { draft ->
-                    onUpdateEvent(event, draft)
-                    editingEvent = null
+                    onUpdateEvent(event, draft, openedFrom)
+                    closeEditor()
                 },
                 saveLabel = "수정",
                 checklists = checklistsFor(event),
                 onChecklist = onEventChecklist?.let { open ->
                     { edited, listId ->
-                        edited?.let { onUpdateEvent(event, it) }
-                        editingEvent = null
+                        edited?.let { onUpdateEvent(event, it, openedFrom) }
+                        closeEditor()
                         open(event, edited?.title ?: event.title, listId)
                     }
                 }
