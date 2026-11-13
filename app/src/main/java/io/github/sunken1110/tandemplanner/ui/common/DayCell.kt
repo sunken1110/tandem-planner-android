@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
-import io.github.sunken1110.tandemplanner.FADE_DAYS
 import java.time.LocalDate
 
 /**
@@ -39,7 +38,8 @@ import java.time.LocalDate
  * Visuals:
  * - Unfilled: a faint tint of the day's season color.
  * - Filled (past days, incl. today): a diagonal light-to-base gradient that
- *   fades in as the year fill animation passes this day.
+ *   fades in as the year fill animation passes this day (days of earlier
+ *   years are fully filled, later years stay unfilled; see [YearPaint.fillProgress]).
  * - Today: a light sweep (shimmer) across the cell every few seconds, plus an
  *   outline unless [showTodayOutline] is false (the month view marks today with
  *   a number badge instead, and draws its own selection ring).
@@ -59,8 +59,6 @@ fun DayCell(
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     val base = paint.colorOf(date)
-    val dayOfYear = date.dayOfYear
-    val isPast = paint.isPast(date)
     val isToday = date == paint.today
     val dark = isSystemInDarkTheme()
     val brush = remember(base, dark) {
@@ -115,9 +113,7 @@ fun DayCell(
 
                 onDrawBehind {
                     // 0 = not reached yet, 1 = fully colored.
-                    val p = if (isPast) {
-                        ((paint.fill() - (dayOfYear - 1)) / FADE_DAYS).coerceIn(0f, 1f)
-                    } else 0f
+                    val p = paint.fillProgress(date)
 
                     if (glowBrush != null && p > 0f) {
                         drawCircle(glowBrush, radius = glowRadius, center = center, alpha = p)
