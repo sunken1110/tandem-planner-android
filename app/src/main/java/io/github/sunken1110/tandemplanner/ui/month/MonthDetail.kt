@@ -1,6 +1,7 @@
 package io.github.sunken1110.tandemplanner.ui.month
 
 import io.github.sunken1110.tandemplanner.ui.common.GlyphButton
+import io.github.sunken1110.tandemplanner.ui.year.monthBoundsKey
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
@@ -177,6 +178,8 @@ private fun deepTone(base: Color): Color = lerp(base, Color.Black, 0.45f)
  *        re-selected (and scrolled to) again.
  * @param colorOf maps an author UID to that member's accent color.
  * @param nameOf  resolves an event's author display name.
+ * @param hasPrev / hasNext whether "‹" / "›" can move on (they cross into the
+ *        neighboring year within the range the calendar shows).
  * @param warmUp  true for the hidden pre-render after launch: the moving light is
  *        shown mid-lap from the start, so its drawing code and GPU shaders get
  *        prepared too (normally the first lap only starts after 2.9 s).
@@ -210,6 +213,8 @@ fun MonthDetail(
     onBack: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    hasPrev: Boolean = true,
+    hasNext: Boolean = true,
     warmUp: Boolean = false
 ) {
     val haptics = rememberHaptics()
@@ -217,7 +222,7 @@ fun MonthDetail(
     val daysInMonth = yearMonth.lengthOfMonth()
 
     // Initial selection: the requested date, else today in the current month, else the 1st.
-    var selectedDay by rememberSaveable(yearMonth.monthValue, initialSelectedDate, focusToken) {
+    var selectedDay by rememberSaveable(yearMonth, initialSelectedDate, focusToken) {
         val focus = initialSelectedDate?.takeIf { YearMonth.from(it) == yearMonth }
             ?: paint.today.takeIf { YearMonth.from(it) == yearMonth }
         mutableIntStateOf(focus?.dayOfMonth ?: 1)
@@ -244,13 +249,13 @@ fun MonthDetail(
     // ── Auto-scroll so the selected day's events are fully visible ──
     // Bumped on each day tap (and on open when a specific date was requested);
     // 0 means "don't scroll", so simply opening a month keeps the grid in view.
-    var revealRequest by remember(yearMonth.monthValue, initialSelectedDate, focusToken) {
+    var revealRequest by remember(yearMonth, initialSelectedDate, focusToken) {
         mutableIntStateOf(if (initialSelectedDate?.let { YearMonth.from(it) } == yearMonth) 1 else 0)
     }
     val revealRequester = remember { BringIntoViewRequester() }
     // Natural size of the section (header + list), and the tallest it has been this month.
     var sectionSize by remember { mutableStateOf(IntSize.Zero) }
-    var sectionMinHeightPx by remember(yearMonth.monthValue) { mutableIntStateOf(0) }
+    var sectionMinHeightPx by remember(yearMonth) { mutableIntStateOf(0) }
     val revealMargin = with(density) { REVEAL_MARGIN.toPx() }
 
     // Keyed on the token too: a new focus request restarts the counter at 1,
@@ -376,7 +381,7 @@ fun MonthDetail(
     val sharedModifier = if (sharedScope != null && animScope != null) {
         with(sharedScope) {
             Modifier.sharedBounds(
-                sharedContentState = rememberSharedContentState(key = "month-${yearMonth.monthValue}"),
+                sharedContentState = rememberSharedContentState(key = monthBoundsKey(yearMonth)),
                 animatedVisibilityScope = animScope
             )
         }
@@ -417,9 +422,21 @@ fun MonthDetail(
                 fontSize = TextUnit.Unspecified
             )
             Spacer(Modifier.weight(1f))
-            GlyphButton("‹", "이전 달", onClick = { haptics.tap(); onPrev() }, enabled = yearMonth.monthValue > 1)
-            Text("${yearMonth.monthValue}월", fontSize = 20.sp, fontWeight = FontWeight.Medium)
-            GlyphButton("›", "다음 달", onClick = { haptics.tap(); onNext() }, enabled = yearMonth.monthValue < 12)
+            GlyphButton("‹", "이전 달", onClick = { haptics.tap(); onPrev() }, enabled = hasPrev)
+            // Another year's month gets its year above it ("2027년 / 1월"), so moving
+            // past December reads as a new year, not as this year's January.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (yearMonth.year != paint.today.year) {
+                    Text(
+                        "${yearMonth.year}년",
+                        fontSize = 11.sp,
+                        lineHeight = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text("${yearMonth.monthValue}월", fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            }
+            GlyphButton("›", "다음 달", onClick = { haptics.tap(); onNext() }, enabled = hasNext)
         }
 
         // ── Everything below scrolls ──

@@ -24,13 +24,40 @@ data class Holiday(val name: String, val short: String)
  */
 object KoreanHolidays {
 
-    /** Years with a holiday list. Other years simply show no holidays. */
-    val COVERED_YEARS = 2026..2027
+    /**
+     * Years with a holiday list. Other years simply show no holidays.
+     * The calendar shows last year to next year, so this must reach one year
+     * past the current one: 2028's list is due before 2027-01-01 (or as soon
+     * as it is announced).
+     */
+    val COVERED_YEARS = 2025..2027
 
     private val byDate: Map<LocalDate, Holiday> = buildMap {
         fun add(y: Int, m: Int, d: Int, name: String, short: String = name) =
             put(LocalDate.of(y, m, d), Holiday(name, short))
         fun sub(y: Int, m: Int, d: Int, of: String) = add(y, m, d, "대체공휴일 ($of)", "대체휴일")
+
+        // ── 2025 ──
+        add(2025, 1, 1, "신정")
+        add(2025, 1, 27, "임시공휴일", "임시휴일")
+        add(2025, 1, 28, "설날 연휴", "설 연휴")
+        add(2025, 1, 29, "설날")
+        add(2025, 1, 30, "설날 연휴", "설 연휴")
+        add(2025, 3, 1, "삼일절")
+        sub(2025, 3, 3, "삼일절")
+        // Children's Day and Buddha's Birthday fell on the same day.
+        add(2025, 5, 5, "어린이날 · 부처님오신날", "어린이날")
+        sub(2025, 5, 6, "어린이날 · 부처님오신날")
+        add(2025, 6, 3, "대통령선거", "선거일")
+        add(2025, 6, 6, "현충일")
+        add(2025, 8, 15, "광복절")
+        add(2025, 10, 3, "개천절")
+        add(2025, 10, 5, "추석 연휴", "추석")
+        add(2025, 10, 6, "추석")
+        add(2025, 10, 7, "추석 연휴", "추석")
+        sub(2025, 10, 8, "추석")
+        add(2025, 10, 9, "한글날")
+        add(2025, 12, 25, "성탄절")
 
         // ── 2026 ──
         add(2026, 1, 1, "신정")

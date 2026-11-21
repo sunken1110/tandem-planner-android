@@ -19,7 +19,7 @@ tandemplanner/
 ├─ model/                 Season(계절과 색), Holidays(연도별 공휴일)
 ├─ data/                  Event, EventDraft, SharedCalendar(Firebase), Checklist(SharedChecklists)
 ├─ ui/calendar/           CalendarScreen: 전체 조립
-├─ ui/year/               YearGrid, YearHeader(지남/남음 토글과 오도미터)
+├─ ui/year/               YearGrid, YearHeader(지남/남음 토글과 오도미터), YearSwitcher("‹ 2026년 ›" 연도 이동)
 ├─ ui/month/              MonthDetail, MonthBands(여러 날 띠), EventRow(체크리스트 칩), SelectionRing
 ├─ ui/editor/             EventEditorSheet, TimeWheel, InlineDatePicker(날짜를 누르면 펼쳐지는 달력)
 ├─ ui/checklist/          ChecklistButton, ChecklistSheet(목록·일정 연결 달력), ChecklistDetail(항목), ChecklistEffects
@@ -52,6 +52,16 @@ tandemplanner/
 - **시간 표기는 모든 곳에서 "오후 3:00"**, 시간 없는 일정은 **"하루 종일"**이다. 24시간제와 "오후 3시"는 사용자가 거부했다. 일관성이 이유다.
 - 날짜 표기는 `koreanDayLabel()`("11월 9일 (월)")로 통일한다. 기간은 "11월 16일(월)~20일(금)"처럼 양쪽에 요일을 붙인다.
 - 표시 순서: 여러 날 일정 → 하루 종일 → 시간순.
+- **달력은 작년~올해~내년, 3년을 보여 준다**(이슈 #7). 연 화면 위 `YearSwitcher`("‹ 2026년 ›")로 해를 바꾸고, 월 화면의 ‹ › 는 12월↔1월에서 이웃 해로 넘어간다. 다른 해를 볼 때는 "올해로" 버튼과 뒤로 가기로 올해에 돌아온다.
+  - 보는 해(`shownYear`)는 달력 영역에만 적용된다. 위쪽 "N일 지남", 진행 바, D-day 카드는 **항상 오늘 기준**이다.
+  - `YearPaint`는 그리는 해(`year`)를 따로 가진다. "지난 날"은 실제 날짜를 오늘과 비교하고(`isPast`), 칸 채우기는 `fillProgress`가 정한다. 작년은 다 칠하고, 내년은 연하게 둔다. 예전처럼 dayOfYear만 비교하면 내년 칸이 "지난 날"로 칠해진다.
+  - 새해 자정에 "올해"를 보고 있었다면 새해로 함께 넘어간다(`rangeYear`와 비교). 다른 해를 보고 있었다면 그 해를 유지하되, 3년 범위 안으로만 맞춘다.
+  - 연 화면 스크롤 상태(`LazyGridState`)는 **실제 연도마다** 따로 둔다(`YearGridStatesSaver`로 회전 후에도 유지). 해를 넘길 때 두 바둑판이 동시에 그려지는데, 한 상태를 두 목록이 함께 쓰면 안 되기 때문이다.
+  - 넘어가는 애니메이션 도중에 빠져나가는 화면의 버튼은 무시한다(`EnterExitState.PostExit`). 그 화면의 옛 연도·달을 기준으로 한 번 더 넘어가 버리기 때문이다.
+  - "애니메이션 줄이기" 설정이 켜져 있으면 해·달 넘기기는 미끄러지지 않고 페이드만 한다.
+  - 공휴일 목록(`KoreanHolidays.COVERED_YEARS`)은 **올해 + 1년**까지 있어야 한다. 2028년 목록은 2027-01-01 전에 넣는다.
+  - shared bounds 키는 `monthBoundsKey(YearMonth)`로 연도를 포함한다. 두 해의 같은 달이 짝지어지지 않게 하려는 것이다.
+  - 저장·이동한 일정, D-day 카드, 위젯 탭은 `openDay()`로 그 해로 넘어가 그 날을 연다. 3년 밖의 날짜(예: 날짜 화살표로 2029년까지 간 경우)는 따라가지 않는다.
 - 상단 "N일 지남"을 탭하면 "N일 남음"으로 바뀐다. 0~9 숫자 바퀴가 굴러가는 오도미터이고, easing은 `CubicBezier(0.2, 0.8, 0.2, 1)`이다. 선택은 prefs `"year_header"/"show_left"`에 저장된다.
 
 ### 체크리스트

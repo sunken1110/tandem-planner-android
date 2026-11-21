@@ -43,7 +43,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 
 /**
- * Whole-year overview: 12 mini months in a 3-column grid.
+ * Whole-year overview of [YearPaint.year]: 12 mini months in a 3-column grid.
  * Each card shares its bounds with [io.github.sunken1110.tandemplanner.ui.month.MonthDetail]
  * so tapping it expands the card in place.
  *
@@ -68,14 +68,15 @@ fun YearGrid(
         modifier = Modifier.fillMaxSize()
     ) {
         items((1..12).toList()) { month ->
+            val yearMonth = YearMonth.of(paint.year, month)
             val sharedModifier = with(sharedScope) {
                 Modifier.sharedBounds(
-                    sharedContentState = rememberSharedContentState(key = "month-$month"),
+                    sharedContentState = rememberSharedContentState(key = monthBoundsKey(yearMonth)),
                     animatedVisibilityScope = animScope
                 )
             }
             MonthCard(
-                yearMonth = YearMonth.of(paint.year, month),
+                yearMonth = yearMonth,
                 paint = paint,
                 eventsByDate = eventsByDate,
                 colorOf = colorOf,
@@ -85,6 +86,12 @@ fun YearGrid(
         }
     }
 }
+
+/**
+ * Shared-bounds key linking a year-grid card to its expanded month view.
+ * Includes the year, so the same month of two years never pairs up.
+ */
+fun monthBoundsKey(yearMonth: YearMonth): String = "month-$yearMonth"
 
 /**
  * A compact month: weekday header plus tiny day cells. Days with events get a
@@ -105,8 +112,10 @@ private fun MonthCard(
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
             .clickable(onClick = onClick)
             // Read as "11월", not as the month name followed by every weekday letter.
+            // Another year's card says its year too ("2027년 1월").
             .clearAndSetSemantics {
-                contentDescription = "${yearMonth.monthValue}월"
+                contentDescription =
+                    (if (yearMonth.year != paint.today.year) "${yearMonth.year}년 " else "") + "${yearMonth.monthValue}월"
                 role = Role.Button
                 onClick { onClick(); true }
             }
